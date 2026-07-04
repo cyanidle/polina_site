@@ -1,8 +1,31 @@
 /**
- * Webcomic server — auto-discovers comics from the filesystem.
+ * Webcomic server — auto-discovers comics and art from the filesystem.
  *
- * Uses Deno.watchFs to monitor the comics directory, so new comics dropped
- * into the folder appear immediately — no restart and no per-request scanning.
+ * Uses Deno.watchFs to monitor comics/ and arts/, so new content dropped
+ * into either folder appears immediately — no restart and no per-request
+ * scanning.
+ *
+ * Layout:
+ *   comics/<lang>/<comic>/<page files>            single-chapter comic
+ *   comics/<lang>/<comic>/<chapter>/<page files>   multi-chapter comic
+ *   comics/<lang>/<comic>/meta.json                optional metadata (see below)
+ *   arts/<file>                                    a piece of art
+ *   arts/<file>.txt                                optional description sidecar
+ *
+ * meta.json (all fields optional):
+ *   {
+ *     "title": "...",
+ *     "description": "...",
+ *     "cover": "0. Обложка.png",
+ *     "teaser": ["1стр.png", "10стр.png"],
+ *     "characters": [{ "name": "...", "about": "..." }],
+ *     "pages": { "3стр.png": { "comment": "...", "date": "2026-01-15" } }
+ *   }
+ *
+ * title, description, character.about and page.comment may also be a
+ * { "ru": "...", "en": "..." } object instead of a plain string — the API
+ * resolves it per-request via the `uiLang` query param (falling back to
+ * the comic's own <lang>, then to whichever translation exists).
  *
  * Architecture:
  *   - dev:  `deno run --allow-net --allow-read server.ts`
@@ -15,7 +38,10 @@
 
 const ROOT = Deno.cwd() + "/";
 const COMICS_DIR = `${ROOT}comics`;
+const ARTS_DIR = `${ROOT}arts`;
 const STATIC_DIR = `${ROOT}static`;
+
+const LANGS = ["ru", "en"];
 
 const IMAGE_EXTS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
@@ -35,80 +61,252 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
-// ── comic cache ─────────────────────────────────────────────────
-//
-// The filesystem is scanned once at startup, then kept up-to-date by
-// a Deno.watchFs watcher.  API handlers read from this cache so they
-// never touch the disk.
+// Natural sort (like Windows Explorer): digit runs compare as numbers,
+// so "2стр.png" < "10стр.png".
+const naturalCompare = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+}).compare;
 
-type Comic = { name: string; pages: string[] };
+// ── types ────────────────────────────────────────────────────────
 
-let comics: Comic[] = [];
+// Either a plain string (shown regardless of UI language) or a map of
+// language code -> text, resolved per-request via pickLocale().
+type Localized = string | Record<string, string>;
 
-async function scan(): Promise<void> {
-  const result: Comic[] = [];
-  const seen = new Set<string>();
+type PageMeta = { comment?: Localized; date?: string };
+type Character = { name: string; about?: Localized };
 
-  try {
-    for await (const entry of Deno.readDir(COMICS_DIR)) {
-      if (!entry.isDirectory) continue;
-      const pages = await readPages(`${COMICS_DIR}/${entry.name}`);
-      if (pages.length > 0) {
-        result.push({ name: entry.name, pages });
-        seen.add(entry.name);
-      }
-    }
-  } catch { /* directory missing */ }
+type Meta = {
+  title?: Localized;
+  description?: Localized;
+  cover?: string;
+  teaser?: string[];
+  characters?: Character[];
+  pages?: Record<string, PageMeta>;
+};
 
-  result.sort((a, b) => a.name.localeCompare(b.name));
+type Page = { file: string; url: string; comment?: Localized; date?: string };
+type Chapter = { name: string; pages: Page[] };
 
-  // Log newcomers
-  const oldNames = new Set(comics.map((c) => c.name));
-  for (const name of seen) {
-    if (!oldNames.has(name)) console.log(`[comic-server] + new comic detected: '${name}'`);
-  }
-  for (const old of oldNames) {
-    if (!seen.has(old)) console.log(`[comic-server] - comic removed: '${old}'`);
-  }
+// Internal cache shape: text fields stay Localized (unresolved) until a
+// request picks a uiLang. `lang` here is the comic's own collection
+// (comics/<lang>/...), used as the fallback locale when uiLang has no match.
+type ComicSummary = { lang: string; name: string; title: Localized; cover: string };
+type ComicDetail = ComicSummary & {
+  description: Localized;
+  teaser: string[];
+  characters: Character[];
+  chapters: Chapter[];
+};
 
-  comics = result;
+type Art = { file: string; title: string; description: string; url: string };
+
+function pickLocale(value: Localized | undefined, uiLang: string, fallbackLang: string): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  return value[uiLang] ?? value[fallbackLang] ?? Object.values(value)[0] ?? "";
 }
 
-async function readPages(dir: string): Promise<string[]> {
-  const pages: string[] = [];
+// The title used for sorting/logging — resolved against the comic's own
+// collection language, independent of any visitor's UI language.
+function nativeTitle(c: ComicSummary): string {
+  return pickLocale(c.title, c.lang, c.lang);
+}
+
+function resolveComicSummary(c: ComicSummary, uiLang: string) {
+  return { lang: c.lang, name: c.name, title: pickLocale(c.title, uiLang, c.lang), cover: c.cover };
+}
+
+function resolveComicDetail(c: ComicDetail, uiLang: string) {
+  return {
+    lang: c.lang,
+    name: c.name,
+    title: pickLocale(c.title, uiLang, c.lang),
+    cover: c.cover,
+    description: pickLocale(c.description, uiLang, c.lang),
+    teaser: c.teaser,
+    characters: c.characters.map((ch) => ({ name: ch.name, about: pickLocale(ch.about, uiLang, c.lang) })),
+    chapters: c.chapters.map((ch) => ({
+      name: ch.name,
+      pages: ch.pages.map((p) => ({
+        file: p.file,
+        url: p.url,
+        comment: p.comment ? pickLocale(p.comment, uiLang, c.lang) : undefined,
+        date: p.date,
+      })),
+    })),
+  };
+}
+
+// ── content cache ────────────────────────────────────────────────
+//
+// The filesystem is scanned once at startup, then kept up-to-date by
+// a Deno.watchFs watcher. API handlers read from this cache so they
+// never touch the disk.
+
+let comicsByLang: Record<string, ComicDetail[]> = {};
+let arts: Art[] = [];
+
+function urlFor(...segments: string[]): string {
+  return "/" + segments.map(encodeURIComponent).join("/");
+}
+
+async function readDirSafe(dir: string): Promise<Deno.DirEntry[]> {
+  const entries: Deno.DirEntry[] = [];
   try {
-    for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isFile) continue;
-      const dot = entry.name.lastIndexOf(".");
-      if (dot === -1) continue;
-      if (IMAGE_EXTS.has(entry.name.substring(dot).toLowerCase())) {
-        pages.push(entry.name);
+    for await (const entry of Deno.readDir(dir)) entries.push(entry);
+  } catch { /* directory missing */ }
+  return entries;
+}
+
+function isImage(filename: string): boolean {
+  const dot = filename.lastIndexOf(".");
+  return dot !== -1 && IMAGE_EXTS.has(filename.substring(dot).toLowerCase());
+}
+
+async function readImageFiles(dir: string): Promise<string[]> {
+  const entries = await readDirSafe(dir);
+  const files = entries.filter((e) => e.isFile && isImage(e.name)).map((e) => e.name);
+  files.sort(naturalCompare);
+  return files;
+}
+
+async function readMeta(dir: string): Promise<Meta> {
+  try {
+    const text = await Deno.readTextFile(`${dir}/meta.json`);
+    return JSON.parse(text) as Meta;
+  } catch {
+    return {};
+  }
+}
+
+function basenameOf(relPath: string): string {
+  const slash = relPath.lastIndexOf("/");
+  return slash === -1 ? relPath : relPath.substring(slash + 1);
+}
+
+async function scanComic(lang: string, name: string): Promise<ComicDetail | null> {
+  const dir = `${COMICS_DIR}/${lang}/${name}`;
+  const entries = await readDirSafe(dir);
+  const subdirs = entries.filter((e) => e.isDirectory).sort((a, b) => naturalCompare(a.name, b.name));
+
+  const chapters: Chapter[] = [];
+  if (subdirs.length > 0) {
+    for (const sub of subdirs) {
+      const files = await readImageFiles(`${dir}/${sub.name}`);
+      if (files.length === 0) continue;
+      chapters.push({
+        name: sub.name,
+        pages: files.map((f) => ({ file: `${sub.name}/${f}`, url: urlFor("comics", lang, name, sub.name, f) })),
+      });
+    }
+  } else {
+    const files = await readImageFiles(dir);
+    if (files.length > 0) {
+      chapters.push({
+        name,
+        pages: files.map((f) => ({ file: f, url: urlFor("comics", lang, name, f) })),
+      });
+    }
+  }
+
+  if (chapters.length === 0) return null;
+
+  const meta = await readMeta(dir);
+  const allPages = chapters.flatMap((c) => c.pages);
+
+  // attach per-page comment/date from meta.json (keyed by bare filename)
+  if (meta.pages) {
+    for (const page of allPages) {
+      const pm = meta.pages[basenameOf(page.file)];
+      if (pm) {
+        page.comment = pm.comment;
+        page.date = pm.date;
       }
     }
-  } catch { /* directory missing */ }
-  pages.sort();
-  return pages;
+  }
+
+  const findByBasename = (bare: string) => allPages.find((p) => basenameOf(p.file) === bare);
+
+  const coverPage = (meta.cover && findByBasename(meta.cover)) || allPages[0];
+  const teaserPages = (meta.teaser ?? [])
+    .map((f) => findByBasename(f))
+    .filter((p): p is Page => !!p);
+
+  return {
+    lang,
+    name,
+    title: meta.title || name,
+    description: meta.description || "",
+    cover: coverPage.url,
+    teaser: teaserPages.map((p) => p.url),
+    characters: meta.characters ?? [],
+    chapters,
+  };
+}
+
+async function scanComicsForLang(lang: string): Promise<ComicDetail[]> {
+  const entries = await readDirSafe(`${COMICS_DIR}/${lang}`);
+  const dirs = entries.filter((e) => e.isDirectory);
+  const result: ComicDetail[] = [];
+  for (const dir of dirs) {
+    const comic = await scanComic(lang, dir.name);
+    if (comic) result.push(comic);
+  }
+  result.sort((a, b) => naturalCompare(nativeTitle(a), nativeTitle(b)));
+  return result;
+}
+
+async function scanArts(): Promise<Art[]> {
+  const entries = await readDirSafe(ARTS_DIR);
+  const files = entries.filter((e) => e.isFile && isImage(e.name)).map((e) => e.name);
+  files.sort(naturalCompare);
+
+  const result: Art[] = [];
+  for (const file of files) {
+    const dot = file.lastIndexOf(".");
+    const title = dot === -1 ? file : file.substring(0, dot);
+    let description = "";
+    try {
+      description = (await Deno.readTextFile(`${ARTS_DIR}/${title}.txt`)).trim();
+    } catch { /* no sidecar */ }
+    result.push({ file, title, description, url: urlFor("arts", file) });
+  }
+  return result;
+}
+
+async function scan(): Promise<void> {
+  const next: Record<string, ComicDetail[]> = {};
+  for (const lang of LANGS) next[lang] = await scanComicsForLang(lang);
+  comicsByLang = next;
+  arts = await scanArts();
 }
 
 // ── filesystem watcher ─────────────────────────────────────────
 
-function startWatcher(): Deno.FsWatcher {
-  // Debounce: coalesce rapid-fire FS events into a single rescan
-  let timer: ReturnType<typeof setTimeout> | null = null;
+function startWatcher(): Deno.FsWatcher[] {
   const DEBOUNCE_MS = 200;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const watcher = Deno.watchFs(COMICS_DIR, { recursive: true });
-  (async () => {
-    for await (const _event of watcher) {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(async () => {
-        await scan();
-        console.log("[comic-server] rescanned after filesystem change");
-      }, DEBOUNCE_MS);
-    }
-  })();
+  const rescan = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(async () => {
+      await scan();
+      console.log("[comic-server] rescanned after filesystem change");
+    }, DEBOUNCE_MS);
+  };
 
-  return watcher;
+  const watchers = [
+    Deno.watchFs(COMICS_DIR, { recursive: true }),
+    Deno.watchFs(ARTS_DIR, { recursive: true }),
+  ];
+  for (const watcher of watchers) {
+    (async () => {
+      for await (const _event of watcher) rescan();
+    })();
+  }
+  return watchers;
 }
 
 // ── file serving ───────────────────────────────────────────────
@@ -137,9 +335,10 @@ async function serveFile(filePath: string): Promise<Response> {
   }
 }
 
-function json(data: unknown): Response {
+function json(data: unknown, status = 200): Response {
   const body = JSON.stringify(data, null, 2);
   return new Response(body, {
+    status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Length": String(new TextEncoder().encode(body).length),
@@ -154,28 +353,40 @@ async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const path = decodeURIComponent(url.pathname);
 
-  // Health check
   if (path === "/api/health") {
-    return json({ status: "ok", comics: comics.length });
+    const total = LANGS.reduce((n, l) => n + (comicsByLang[l]?.length ?? 0), 0);
+    return json({ status: "ok", comics: total, arts: arts.length });
   }
 
-  // API: list all comics (from cache)
-  if (path === "/api/comics") {
-    return json(comics);
+  if (path === "/api/arts") {
+    return json(arts);
   }
 
-  // API: single comic detail (from cache)
+  // /api/comics/<lang> -> summaries
+  // /api/comics/<lang>/<name> -> full detail
   if (path.startsWith("/api/comics/")) {
-    const name = path.slice("/api/comics/".length).replace(/\/$/, "");
-    const comic = comics.find((c) => c.name === name);
-    if (!comic) {
-      return new Response("Comic not found", { status: 404 });
+    const rest = path.slice("/api/comics/".length).replace(/\/$/, "");
+    const slash = rest.indexOf("/");
+    const lang = slash === -1 ? rest : rest.slice(0, slash);
+
+    if (!LANGS.includes(lang)) {
+      return json({ error: `unknown lang '${lang}', expected one of: ${LANGS.join(", ")}` }, 404);
     }
-    return json(comic);
+
+    const uiLang = url.searchParams.get("uiLang") || lang;
+
+    if (slash === -1) {
+      return json((comicsByLang[lang] ?? []).map((c) => resolveComicSummary(c, uiLang)));
+    }
+
+    const name = rest.slice(slash + 1);
+    const comic = (comicsByLang[lang] ?? []).find((c) => c.name === name);
+    if (!comic) return new Response("Comic not found", { status: 404 });
+    return json(resolveComicDetail(comic, uiLang));
   }
 
-  // Comic images
-  if (path.startsWith("/comics/")) {
+  // Comic / art images
+  if (path.startsWith("/comics/") || path.startsWith("/arts/")) {
     const filePath = `${ROOT}${path.replace(/^\//, "")}`;
     return await serveFile(filePath);
   }
@@ -185,7 +396,12 @@ async function handle(req: Request): Promise<Response> {
   if (path === "/" || path.endsWith("/")) {
     staticPath = `${STATIC_DIR}${path}index.html`;
   }
-  return await serveFile(staticPath);
+  const res = await serveFile(staticPath);
+  // SPA fallback: unknown non-file routes (client-side router paths) serve index.html
+  if (res.status === 404 && !extOf(path)) {
+    return await serveFile(`${STATIC_DIR}/index.html`);
+  }
+  return res;
 }
 
 // ── main ───────────────────────────────────────────────────────
@@ -194,20 +410,16 @@ async function main() {
   const hostname = Deno.args[0] ?? "127.0.0.1";
   const port = parseInt(Deno.args[1] ?? "8080", 10);
 
-  // Ensure directories exist
-  try { Deno.mkdirSync(COMICS_DIR); } catch { /* ok */ }
-  try { Deno.mkdirSync(STATIC_DIR); } catch { /* ok */ }
-
   // Initial scan
   await scan();
 
   // Watch for changes
-  const watcher = startWatcher();
+  const watchers = startWatcher();
 
   // Shutdown cleanup
   const shutdown = () => {
     console.log("\nshutting down…");
-    try { watcher.close(); } catch { /* ok */ }
+    for (const w of watchers) { try { w.close(); } catch { /* ok */ } }
     Deno.exit(0);
   };
   Deno.addSignalListener("SIGINT", shutdown);
@@ -218,10 +430,12 @@ async function main() {
     return await handle(req);
   });
 
+  const total = LANGS.reduce((n, l) => n + (comicsByLang[l]?.length ?? 0), 0);
   console.log(`webcomic server @ http://${hostname}:${port}`);
-  console.log(`  comics dir : ${COMICS_DIR}`);
+  console.log(`  comics dir : ${COMICS_DIR} (langs: ${LANGS.join(", ")})`);
+  console.log(`  arts dir   : ${ARTS_DIR}`);
   console.log(`  static dir : ${STATIC_DIR}`);
-  console.log(`  comics found: ${comics.length}`);
+  console.log(`  comics found: ${total}, arts found: ${arts.length}`);
   if (hostname === "127.0.0.1") {
     console.log("  (localhost only — put nginx in front for public access)");
   }

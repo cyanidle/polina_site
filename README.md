@@ -1,0 +1,89 @@
+# Hardgrizz Comics
+
+A self-hosted webcomic + art site with a Hardgrizz-poster look: white background, red/yellow/blue geometric shapes, bold angular type. Deno backend, vanilla-JS single-page frontend — no build step, no database, no dependencies beyond [Deno](https://deno.land/).
+
+For how to add comics/art, see **[UPLOADING.md](UPLOADING.md)** (short, in Russian, with layout examples).
+
+## Quick start
+
+```bash
+# 1. Install Deno (once)
+curl -fsSL https://deno.land/install.sh | sh
+
+# 2. Add a comic (Russian or English)
+mkdir -p "comics/ru/Мой комикс"
+cp page1.png page2.png "comics/ru/Мой комикс/"
+
+# 3. Run the server from the repo root
+deno run --allow-net --allow-read server.ts
+# or: deno task dev
+```
+
+Open http://127.0.0.1:8080 — done.
+
+Custom host/port:
+
+```bash
+deno run --allow-net --allow-read server.ts 0.0.0.0 9090
+```
+
+## Site structure
+
+- **Landing** — welcome text, two buttons: "Комиксы" / "Арты".
+- **Арты** — grid of art with titles; click to open enlarged with description.
+- **Комиксы** → pick **Русский** / **English** → grid of comics (cover + title) in that language.
+- **Comic page** — carousel (cover + teaser pages), title, description, chapter picker, "Читать с начала", character list.
+- **Reader** — one page at a time, arrow navigation (click/keyboard/swipe), page-jump field, fullscreen mode (button or <kbd>F</kbd>), author comment + publish date per page if set.
+
+The whole UI is bilingual (RU/EN) via a corner toggle; picking a language in the comics section also switches the UI language. Comic text (title, description, character bios, page comments) can be translated within a single `meta.json` instead of duplicating the comic under both `comics/ru/` and `comics/en/` — see `UPLOADING.md`.
+
+## Content layout
+
+```
+comics/ru/<comic>/<page files>              single-chapter comic
+comics/ru/<comic>/<chapter>/<page files>    multi-chapter comic
+comics/ru/<comic>/meta.json                 optional: title, description, cover,
+                                             teaser pages, characters, per-page
+                                             comments/dates
+comics/en/...                                same, for the English version
+arts/<file>                                  a piece of art
+arts/<file>.txt                              optional description sidecar
+```
+
+Details and examples: **[UPLOADING.md](UPLOADING.md)**.
+
+`comics/` and `arts/` are gitignored — content lives only on the server, not in the repo. The server watches both directories (`Deno.watchFs`) and picks up changes within ~200ms, no restart needed.
+
+## How it works
+
+```
+static/          frontend: index.html (SPA shell), app.js (hash router + views), style.css
+server.ts        Deno server: static files, /api/comics, /api/arts, image serving
+comics/          your comics (gitignored)
+arts/            your art (gitignored)
+nginx.conf       optional production reverse-proxy config
+deno.json        deno task "dev"; also enables editor Deno support
+```
+
+API (served from an in-memory cache kept fresh by `Deno.watchFs`):
+
+- `GET /api/health` — `{status, comics, arts}` counts
+- `GET /api/comics/<lang>` — list of `{lang, name, title, cover}` (lang: `ru` or `en`)
+- `GET /api/comics/<lang>/<name>` — full comic: description, teaser, characters, chapters (each page has `file`, `url`, optional `comment`/`date`)
+- `GET /api/arts` — list of `{file, title, description, url}`
+
+Both comics endpoints accept an optional `?uiLang=ru|en` query param to resolve any translated (`{"ru": "...", "en": "..."}`) text fields in `meta.json`; it defaults to `<lang>` if omitted.
+
+## Production (nginx)
+
+nginx serves `static/`, `comics/`, `arts/` directly and proxies only `/api/` to Deno on localhost:
+
+```bash
+sudo cp nginx.conf /etc/nginx/sites-available/comic
+sudo ln -s /etc/nginx/sites-available/comic /etc/nginx/sites-enabled/
+# edit server_name and the /path/to/polina_site paths in the config
+sudo nginx -t && sudo nginx -s reload
+deno run --allow-net --allow-read server.ts   # stays on 127.0.0.1:8080
+```
+
+The frontend uses the same relative URLs either way, so nothing else changes.

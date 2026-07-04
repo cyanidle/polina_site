@@ -1,16 +1,96 @@
 /**
- * Webcomic Reader — frontend
+ * Hardgrizz Comics — frontend
  *
- * The frontend is server-agnostic: URLs are the same whether Python or nginx
- * is in front.  In dev, server.py handles everything.  In prod, nginx serves
- * static files and images directly, proxying only /api/ to Python on localhost.
+ * Single-page app with a tiny hash router. No build step, no framework.
+ * Server API: /api/comics/<lang>, /api/comics/<lang>/<name>, /api/arts.
  */
 
-// ── polling ──────────────────────────────────────────────────
+// ── i18n ─────────────────────────────────────────────────────
 
-const POLL_INTERVAL_MS = 30_000;   // how often to check for new comics
+const STRINGS = {
+  ru: {
+    welcomeTitle: "Hardgrizz Comics",
+    welcomeText: "Комиксы и рисунки. Заходите, листайте, наслаждайтесь.",
+    comics: "Комиксы",
+    arts: "Арты",
+    pickLanguage: "Выберите язык",
+    russian: "Русский",
+    english: "English",
+    readFromStart: "Читать с начала",
+    chapters: "Главы",
+    characters: "Персонажи",
+    back: "Назад",
+    backToComics: "К комиксам",
+    backToArts: "К артам",
+    backToComic: "К странице комикса",
+    home: "На главную",
+    noComics: "Комиксы пока не добавлены.",
+    noArts: "Работы пока не добавлены.",
+    loading: "Загрузка…",
+    error: "Не удалось загрузить данные.",
+    page: "Страница",
+    published: "Опубликовано",
+    fullscreen: "На весь экран",
+    exitFullscreen: "Свернуть",
+  },
+  en: {
+    welcomeTitle: "Hardgrizz Comics",
+    welcomeText: "Comics and art. Come in, browse, enjoy.",
+    comics: "Comics",
+    arts: "Arts",
+    pickLanguage: "Pick a language",
+    russian: "Русский",
+    english: "English",
+    readFromStart: "Read from the start",
+    chapters: "Chapters",
+    characters: "Characters",
+    back: "Back",
+    backToComics: "Back to comics",
+    backToArts: "Back to arts",
+    backToComic: "Back to comic page",
+    home: "Home",
+    noComics: "No comics yet.",
+    noArts: "No art yet.",
+    loading: "Loading…",
+    error: "Failed to load data.",
+    page: "Page",
+    published: "Published",
+    fullscreen: "Fullscreen",
+    exitFullscreen: "Exit fullscreen",
+  },
+};
 
-// ── API helpers ──────────────────────────────────────────────
+let siteLang = localStorage.getItem("siteLang") || "ru";
+
+function t(key) {
+  return STRINGS[siteLang][key] ?? STRINGS.ru[key] ?? key;
+}
+
+function setSiteLang(lang) {
+  siteLang = lang;
+  localStorage.setItem("siteLang", lang);
+  document.documentElement.lang = lang;
+  renderLangToggle();
+  render();
+}
+
+function renderLangToggle() {
+  document.querySelectorAll("[data-lang-btn]").forEach((el) => {
+    el.classList.toggle("active", el.dataset.langBtn === siteLang);
+  });
+}
+
+document.getElementById("lang-toggle").addEventListener("click", () => {
+  setSiteLang(siteLang === "ru" ? "en" : "ru");
+});
+
+// ── util ─────────────────────────────────────────────────────
+
+function escapeHTML(str) {
+  const div = document.createElement("div");
+  div.appendChild(document.createTextNode(str ?? ""));
+  return div.innerHTML;
+}
 
 async function fetchJSON(url) {
   const res = await fetch(url);
@@ -18,254 +98,439 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-function imageUrl(comicName, pageFile) {
-  return `/comics/${encodeURIComponent(comicName)}/${encodeURIComponent(pageFile)}`;
+function navigate(path) {
+  location.hash = path;
 }
 
-// ── state ────────────────────────────────────────────────────
-
-let state = {
-  comics: [],        // [{name, pages: [string]}]
-  activeComic: null, // name of selected comic, or null
-  activePage: 0,     // index into active comic's pages array
-  sidebarOpen: false,
-};
-
-// ── DOM refs ─────────────────────────────────────────────────
-
-const $comicList    = document.getElementById("comic-list");
-const $comicTitle   = document.getElementById("comic-title");
-const $pageInd      = document.getElementById("page-indicator");
-const $pageImage    = document.getElementById("page-image");
-const $btnPrev      = document.getElementById("btn-prev");
-const $btnNext      = document.getElementById("btn-next");
-const $lightbox     = document.getElementById("lightbox");
-const $lightboxImg  = document.getElementById("lightbox-image");
-const $btnMenu      = document.getElementById("btn-menu");
-const $sidebar      = document.getElementById("sidebar");
-const $backdrop     = document.getElementById("sidebar-backdrop");
-
-// ── sidebar toggle (mobile) ──────────────────────────────────
-
-function openSidebar() {
-  state.sidebarOpen = true;
-  $sidebar.classList.add("open");
-  $backdrop.classList.add("visible");
+function encPath(...segments) {
+  return segments.map(encodeURIComponent).join("/");
 }
 
-function closeSidebar() {
-  state.sidebarOpen = false;
-  $sidebar.classList.remove("open");
-  $backdrop.classList.remove("visible");
+// ── fullscreen ───────────────────────────────────────────────
+
+function fullscreenSupported() {
+  return !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 }
 
-function toggleSidebar() {
-  state.sidebarOpen ? closeSidebar() : openSidebar();
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
 
-// ── render ────────────────────────────────────────────────────
-
-function renderComicList() {
-  if (state.comics.length === 0) {
-    $comicList.innerHTML = '<p class="placeholder">No comics found.<br>Drop a folder into <code>comics/</code></p>';
-    return;
+function toggleFullscreen(el) {
+  if (fullscreenElement()) {
+    Promise.resolve((document.exitFullscreen || document.webkitExitFullscreen)?.call(document)).catch(() => {});
+  } else {
+    Promise.resolve((el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)).catch(() => {});
   }
-
-  $comicList.innerHTML = state.comics
-    .map(
-      (c) => `
-      <button class="comic-item${c.name === state.activeComic ? " active" : ""}"
-              data-comic="${escapeHTML(c.name)}">
-        ${escapeHTML(c.name)}
-        <span class="page-count">${c.pages.length} page${c.pages.length !== 1 ? "s" : ""}</span>
-      </button>`
-    )
-    .join("");
 }
 
-function renderReader() {
-  const comic = state.comics.find((c) => c.name === state.activeComic);
+// Wires a button to toggle fullscreen on `el`. Hides the button entirely
+// on browsers without Fullscreen API support (notably iOS Safari).
+function setupFullscreenButton(btn, el) {
+  if (!btn || !fullscreenSupported()) { btn?.classList.add("hidden"); return; }
 
-  if (!comic) {
-    $comicTitle.textContent = "← pick a comic";
-    $pageInd.textContent = "";
-    $pageImage.src = "";
-    $pageImage.alt = "";
-    $btnPrev.disabled = true;
-    $btnNext.disabled = true;
-    return;
-  }
-
-  $comicTitle.textContent = comic.name;
-
-  const page = comic.pages[state.activePage];
-  $pageInd.textContent = `${state.activePage + 1} / ${comic.pages.length}`;
-  $btnPrev.disabled = state.activePage === 0;
-  $btnNext.disabled = state.activePage >= comic.pages.length - 1;
-
-  $pageImage.classList.add("loading");
-  $pageImage.src = imageUrl(comic.name, page);
-  $pageImage.alt = page;
-  $pageImage.onload = () => $pageImage.classList.remove("loading");
-  $pageImage.onerror = () => {
-    $pageImage.classList.remove("loading");
-    $pageImage.alt = "Failed to load image";
+  const update = () => {
+    const active = fullscreenElement() === el;
+    btn.textContent = active ? t("exitFullscreen") : t("fullscreen");
   };
+  update();
+
+  btn.addEventListener("click", () => toggleFullscreen(el));
+  document.addEventListener("fullscreenchange", update);
+  document.addEventListener("webkitfullscreenchange", update);
+  window.addEventListener("hashchange", () => {
+    document.removeEventListener("fullscreenchange", update);
+    document.removeEventListener("webkitfullscreenchange", update);
+  }, { once: true });
 }
 
-// ── actions ───────────────────────────────────────────────────
+// ── router ───────────────────────────────────────────────────
 
-function selectComic(name) {
-  state.activeComic = name;
-  state.activePage = 0;
-  closeSidebar();  // auto-close on mobile after picking
-  renderComicList();
-  renderReader();
+const $app = document.getElementById("app");
+
+function parseHash() {
+  const hash = location.hash.replace(/^#\/?/, "");
+  return hash.split("/").filter((s) => s.length > 0).map(decodeURIComponent);
 }
 
-function goToPage(index) {
-  const comic = state.comics.find((c) => c.name === state.activeComic);
-  if (!comic) return;
-  state.activePage = Math.max(0, Math.min(index, comic.pages.length - 1));
-  renderReader();
-}
+async function render() {
+  const route = parseHash();
+  renderLangToggle();
 
-function goPrev() { goToPage(state.activePage - 1); }
-function goNext() { goToPage(state.activePage + 1); }
-
-// ── swipe support ────────────────────────────────────────────
-
-let _touchStartX = 0;
-let _touchStartY = 0;
-
-function onTouchStart(e) {
-  if (e.touches.length !== 1) return;
-  _touchStartX = e.touches[0].clientX;
-  _touchStartY = e.touches[0].clientY;
-}
-
-function onTouchEnd(e) {
-  if (e.changedTouches.length !== 1) return;
-  const dx = e.changedTouches[0].clientX - _touchStartX;
-  const dy = e.changedTouches[0].clientY - _touchStartY;
-
-  // Only trigger if horizontal swipe dominates
-  if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
-
-  if (dx < 0) goNext();
-  else goPrev();
-}
-
-// ── events ────────────────────────────────────────────────────
-
-$comicList.addEventListener("click", (e) => {
-  const btn = e.target.closest(".comic-item");
-  if (!btn) return;
-  selectComic(btn.dataset.comic);
-});
-
-$btnPrev.addEventListener("click", goPrev);
-$btnNext.addEventListener("click", goNext);
-
-$btnMenu.addEventListener("click", toggleSidebar);
-$backdrop.addEventListener("click", closeSidebar);
-
-// Close sidebar on Escape
-document.addEventListener("keydown", (e) => {
-  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-  switch (e.key) {
-    case "ArrowLeft":  goPrev(); break;
-    case "ArrowRight": goNext(); break;
-    case "Escape":
-      if (state.sidebarOpen) closeSidebar();
-      else $lightbox.classList.add("lightbox-hidden");
-      break;
-  }
-});
-
-// Click on the page image → open lightbox
-$pageImage.addEventListener("click", () => {
-  if (!$pageImage.src) return;
-  $lightboxImg.src = $pageImage.src;
-  $lightbox.classList.remove("lightbox-hidden");
-});
-
-// Click anywhere in lightbox → close
-$lightbox.addEventListener("click", () => {
-  $lightbox.classList.add("lightbox-hidden");
-  $lightboxImg.src = "";
-});
-
-// Swipe navigation on the page viewport
-const $viewport = document.getElementById("page-viewport");
-$viewport.addEventListener("touchstart", onTouchStart, { passive: true });
-$viewport.addEventListener("touchend", onTouchEnd, { passive: true });
-
-// ── auto-discovery polling ───────────────────────────────────
-
-let _pollTimer = null;
-
-async function pollForNewComics() {
   try {
-    const comics = await fetchJSON("/api/comics");
-
-    const oldNames = new Set(state.comics.map((c) => c.name));
-    const newNames = new Set(comics.map((c) => c.name));
-    const added = comics.filter((c) => !oldNames.has(c.name));
-
-    state.comics = comics;
-
-    // If current comic was removed, pick the first available
-    if (state.activeComic && !newNames.has(state.activeComic)) {
-      state.activeComic = comics.length > 0 ? comics[0].name : null;
-      state.activePage = 0;
+    if (route.length === 0) return renderLanding();
+    if (route[0] === "comics" && route.length === 1) return renderLangPicker();
+    if (route[0] === "comics" && route.length === 2) return await renderComicsGrid(route[1]);
+    if (route[0] === "comics" && route.length === 3) return await renderComicDetail(route[1], route[2]);
+    if (route[0] === "comics" && route[3] === "read") {
+      return await renderReader(route[1], route[2], Number(route[4]), Number(route[5]));
     }
-
-    renderComicList();
-
-    // If a new comic appeared and nothing is selected, auto-select it
-    if (added.length > 0 && !state.activeComic && comics.length > 0) {
-      selectComic(comics[0].name);
-    }
+    if (route[0] === "arts" && route.length === 1) return await renderArtsGrid();
+    if (route[0] === "arts" && route.length === 2) return await renderArtDetail(route[1]);
   } catch (err) {
-    console.warn("poll error:", err);
-  } finally {
-    _pollTimer = setTimeout(pollForNewComics, POLL_INTERVAL_MS);
-  }
-}
-
-// ── init ──────────────────────────────────────────────────────
-
-async function init() {
-  try {
-    state.comics = await fetchJSON("/api/comics");
-  } catch (err) {
-    $comicList.innerHTML =
-      '<p class="placeholder">Failed to load comics.<br><small>' +
-      escapeHTML(String(err)) +
-      "</small></p>";
-    console.error("init error:", err);
+    console.error(err);
+    $app.innerHTML = `<div class="view"><p class="placeholder">${escapeHTML(t("error"))}</p></div>`;
     return;
   }
 
-  renderComicList();
-
-  if (state.comics.length > 0) {
-    selectComic(state.comics[0].name);
-  }
-
-  // Start background polling for new comics
-  _pollTimer = setTimeout(pollForNewComics, POLL_INTERVAL_MS);
+  navigate("/");
 }
 
-// ── util ──────────────────────────────────────────────────────
+window.addEventListener("hashchange", render);
 
-function escapeHTML(str) {
-  const div = document.createElement("div");
-  div.appendChild(document.createTextNode(str));
-  return div.innerHTML;
+// ── shapes (decorative) ─────────────────────────────────────
+
+function landingShapes() {
+  return `
+    <div class="landing-shapes">
+      <div class="shape shape-square shape-yellow-bar"></div>
+      <div class="shape shape-square shape-red-diamond shape-diamond"></div>
+      <div class="shape shape-circle shape-blue-circle"></div>
+      <div class="shape shape-square shape-red-bar"></div>
+    </div>`;
+}
+
+// ── landing ──────────────────────────────────────────────────
+
+function renderLanding() {
+  document.title = "Hardgrizz Comics";
+  $app.innerHTML = `
+    <div class="view landing">
+      ${landingShapes()}
+      <div class="landing-content">
+        <h1 class="landing-title">${escapeHTML(t("welcomeTitle"))}</h1>
+        <p class="landing-text">${escapeHTML(t("welcomeText"))}</p>
+        <div class="landing-buttons">
+          <button class="btn btn-red" data-nav="/comics">${escapeHTML(t("comics"))}</button>
+          <button class="btn btn-blue" data-nav="/arts">${escapeHTML(t("arts"))}</button>
+        </div>
+      </div>
+    </div>`;
+  bindNav();
+}
+
+// ── comics: language picker ──────────────────────────────────
+
+function renderLangPicker() {
+  document.title = `${t("comics")} — Hardgrizz Comics`;
+  $app.innerHTML = `
+    <div class="view lang-picker">
+      <button class="btn btn-red" data-lang-pick="ru">${escapeHTML(t("russian"))}</button>
+      <button class="btn btn-blue" data-lang-pick="en">${escapeHTML(t("english"))}</button>
+    </div>`;
+
+  $app.querySelectorAll("[data-lang-pick]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const lang = btn.dataset.langPick;
+      setSiteLang(lang);
+      navigate(`/comics/${lang}`);
+    });
+  });
+}
+
+// ── comics: grid ─────────────────────────────────────────────
+
+async function renderComicsGrid(lang) {
+  document.title = `${t("comics")} — Hardgrizz Comics`;
+  $app.innerHTML = `
+    <div class="view">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">${escapeHTML(t("comics"))}</h2>
+          <button class="back-link" data-nav="/">← ${escapeHTML(t("home"))}</button>
+        </div>
+        <div class="grid" id="comics-grid">
+          <p class="placeholder">${escapeHTML(t("loading"))}</p>
+        </div>
+      </div>
+    </div>`;
+  bindNav();
+
+  const comics = await fetchJSON(`/api/comics/${encodeURIComponent(lang)}?uiLang=${encodeURIComponent(siteLang)}`);
+  const $grid = document.getElementById("comics-grid");
+
+  if (comics.length === 0) {
+    $grid.innerHTML = `<p class="placeholder">${escapeHTML(t("noComics"))}</p>`;
+    return;
+  }
+
+  $grid.innerHTML = comics.map((c) => `
+    <button class="card" data-nav="/comics/${encPath(lang, c.name)}">
+      <div class="card-accent"></div>
+      <img class="card-cover" src="${escapeHTML(c.cover)}" alt="${escapeHTML(c.title)}" loading="lazy">
+      <div class="card-title">${escapeHTML(c.title)}</div>
+    </button>`).join("");
+  bindNav();
+}
+
+// ── comics: detail ───────────────────────────────────────────
+
+async function renderComicDetail(lang, name) {
+  const comic = await fetchJSON(`/api/comics/${encPath(lang, name)}?uiLang=${encodeURIComponent(siteLang)}`);
+  document.title = `${comic.title} — Hardgrizz Comics`;
+
+  const carouselImages = [comic.cover, ...comic.teaser.filter((u) => u !== comic.cover)];
+
+  $app.innerHTML = `
+    <div class="view comic-detail">
+      <div class="container">
+        <div class="section-header">
+          <button class="back-link" data-nav="/comics/${encodeURIComponent(lang)}">← ${escapeHTML(t("backToComics"))}</button>
+        </div>
+
+        <div class="comic-top">
+          <div class="carousel" id="carousel">
+            <div class="carousel-track">
+              <img id="carousel-img" src="${escapeHTML(carouselImages[0])}" alt="${escapeHTML(comic.title)}">
+            </div>
+            ${carouselImages.length > 1 ? `
+              <button class="carousel-nav carousel-prev" aria-label="prev">‹</button>
+              <button class="carousel-nav carousel-next" aria-label="next">›</button>
+              <div class="carousel-dots">
+                ${carouselImages.map((_, i) => `<span class="carousel-dot${i === 0 ? " active" : ""}" data-dot="${i}"></span>`).join("")}
+              </div>` : ""}
+          </div>
+
+          <div class="comic-info">
+            <h1 class="comic-title">${escapeHTML(comic.title)}</h1>
+            ${comic.description ? `<p class="comic-description">${escapeHTML(comic.description)}</p>` : ""}
+
+            <div class="comic-actions">
+              <button class="btn btn-red" id="read-from-start">${escapeHTML(t("readFromStart"))}</button>
+            </div>
+
+            ${comic.chapters.length > 1 ? `
+              <span class="chapters-label">${escapeHTML(t("chapters"))}</span>
+              <div class="chapters-list">
+                ${comic.chapters.map((ch, i) => `
+                  <button class="chapter-btn" data-chapter="${i}">${escapeHTML(ch.name)}</button>
+                `).join("")}
+              </div>` : ""}
+          </div>
+        </div>
+
+        ${comic.characters.length > 0 ? `
+          <div class="characters">
+            <span class="characters-label">${escapeHTML(t("characters"))}</span>
+            <div class="characters-list">
+              ${comic.characters.map((ch) => `
+                <div class="character-card">
+                  <div class="character-name">${escapeHTML(ch.name)}</div>
+                  ${ch.about ? `<div class="character-about">${escapeHTML(ch.about)}</div>` : ""}
+                </div>
+              `).join("")}
+            </div>
+          </div>` : ""}
+      </div>
+    </div>`;
+  bindNav();
+
+  // carousel behaviour
+  let carouselIndex = 0;
+  const $carouselImg = document.getElementById("carousel-img");
+  function showCarousel(i) {
+    carouselIndex = (i + carouselImages.length) % carouselImages.length;
+    $carouselImg.src = carouselImages[carouselIndex];
+    document.querySelectorAll(".carousel-dot").forEach((d, di) => d.classList.toggle("active", di === carouselIndex));
+  }
+  document.querySelector(".carousel-prev")?.addEventListener("click", () => showCarousel(carouselIndex - 1));
+  document.querySelector(".carousel-next")?.addEventListener("click", () => showCarousel(carouselIndex + 1));
+  document.querySelectorAll(".carousel-dot").forEach((d) => {
+    d.addEventListener("click", () => showCarousel(Number(d.dataset.dot)));
+  });
+
+  // read from start / chapter selection
+  document.getElementById("read-from-start").addEventListener("click", () => {
+    navigate(`/comics/${encPath(lang, name)}/read/0/0`);
+  });
+  document.querySelectorAll("[data-chapter]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      navigate(`/comics/${encPath(lang, name)}/read/${btn.dataset.chapter}/0`);
+    });
+  });
+}
+
+// ── comics: reader ───────────────────────────────────────────
+
+async function renderReader(lang, name, chapterIdx, pageIdx) {
+  const comic = await fetchJSON(`/api/comics/${encPath(lang, name)}?uiLang=${encodeURIComponent(siteLang)}`);
+  const chapter = comic.chapters[chapterIdx];
+  if (!chapter) return navigate(`/comics/${encPath(lang, name)}`);
+
+  pageIdx = Math.max(0, Math.min(pageIdx || 0, chapter.pages.length - 1));
+  const page = chapter.pages[pageIdx];
+  document.title = `${comic.title} — ${t("page")} ${pageIdx + 1}`;
+
+  const atFirstChapter = chapterIdx === 0;
+  const atLastChapter = chapterIdx === comic.chapters.length - 1;
+  const atFirstPage = pageIdx === 0;
+  const atLastPage = pageIdx === chapter.pages.length - 1;
+
+  const prevDisabled = atFirstPage && atFirstChapter;
+  const nextDisabled = atLastPage && atLastChapter;
+
+  $app.innerHTML = `
+    <div class="view reader">
+      <div class="reader-header">
+        <button class="back-link" data-nav="/comics/${encPath(lang, name)}">← ${escapeHTML(t("backToComic"))}</button>
+        <div class="reader-titles">
+          <div class="reader-comic-title">${escapeHTML(comic.title)}</div>
+          ${comic.chapters.length > 1 ? `<div class="reader-chapter-title">${escapeHTML(chapter.name)}</div>` : ""}
+        </div>
+        <button class="btn-ghost fullscreen-btn" id="reader-fullscreen">${escapeHTML(t("fullscreen"))}</button>
+      </div>
+
+      <div class="reader-viewport" id="reader-viewport">
+        <button class="reader-nav reader-prev" id="reader-prev" ${prevDisabled ? "disabled" : ""}>‹</button>
+        <img id="reader-image" src="${escapeHTML(page.url)}" alt="${escapeHTML(page.file)}">
+        <button class="reader-nav reader-next" id="reader-next" ${nextDisabled ? "disabled" : ""}>›</button>
+      </div>
+
+      <div class="reader-footer">
+        <div class="reader-page-jump">
+          <input id="reader-page-input" type="number" min="1" max="${chapter.pages.length}" value="${pageIdx + 1}" inputmode="numeric">
+          <span>/ ${chapter.pages.length}</span>
+        </div>
+        <div class="reader-meta">
+          ${page.comment ? `<p class="reader-comment">${escapeHTML(page.comment)}</p>` : ""}
+          ${page.date ? `<p class="reader-date">${escapeHTML(t("published"))}: ${escapeHTML(page.date)}</p>` : ""}
+        </div>
+      </div>
+    </div>`;
+  bindNav();
+
+  function go(nextChapterIdx, nextPageIdx) {
+    navigate(`/comics/${encPath(lang, name)}/read/${nextChapterIdx}/${nextPageIdx}`);
+  }
+
+  function goPrev() {
+    if (pageIdx > 0) return go(chapterIdx, pageIdx - 1);
+    if (chapterIdx > 0) {
+      const prevChapter = comic.chapters[chapterIdx - 1];
+      return go(chapterIdx - 1, prevChapter.pages.length - 1);
+    }
+  }
+
+  function goNext() {
+    if (pageIdx < chapter.pages.length - 1) return go(chapterIdx, pageIdx + 1);
+    if (chapterIdx < comic.chapters.length - 1) return go(chapterIdx + 1, 0);
+  }
+
+  document.getElementById("reader-prev").addEventListener("click", goPrev);
+  document.getElementById("reader-next").addEventListener("click", goNext);
+  setupFullscreenButton(document.getElementById("reader-fullscreen"), document.querySelector(".reader"));
+
+  const $input = document.getElementById("reader-page-input");
+  function commitPageInput() {
+    const n = parseInt($input.value, 10);
+    if (Number.isNaN(n)) { $input.value = pageIdx + 1; return; }
+    go(chapterIdx, Math.max(0, Math.min(n - 1, chapter.pages.length - 1)));
+  }
+  $input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { commitPageInput(); $input.blur(); }
+  });
+  $input.addEventListener("blur", commitPageInput);
+  $input.addEventListener("focus", () => $input.select());
+
+  function onKeydown(e) {
+    if (e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowLeft") goPrev();
+    if (e.key === "ArrowRight") goNext();
+    if (e.key === "f" || e.key === "F") toggleFullscreen(document.querySelector(".reader"));
+  }
+  document.addEventListener("keydown", onKeydown);
+
+  // swipe support
+  let touchStartX = 0, touchStartY = 0;
+  const $viewport = document.getElementById("reader-viewport");
+  $viewport.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  $viewport.addEventListener("touchend", (e) => {
+    if (e.changedTouches.length !== 1) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    if (dx < 0) goNext(); else goPrev();
+  }, { passive: true });
+
+  // clean up the keydown listener when we navigate away
+  window.addEventListener("hashchange", () => document.removeEventListener("keydown", onKeydown), { once: true });
+}
+
+// ── arts: grid ───────────────────────────────────────────────
+
+async function renderArtsGrid() {
+  document.title = `${t("arts")} — Hardgrizz Comics`;
+  $app.innerHTML = `
+    <div class="view">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">${escapeHTML(t("arts"))}</h2>
+          <button class="back-link" data-nav="/">← ${escapeHTML(t("home"))}</button>
+        </div>
+        <div class="grid" id="arts-grid">
+          <p class="placeholder">${escapeHTML(t("loading"))}</p>
+        </div>
+      </div>
+    </div>`;
+  bindNav();
+
+  const arts = await fetchJSON("/api/arts");
+  const $grid = document.getElementById("arts-grid");
+
+  if (arts.length === 0) {
+    $grid.innerHTML = `<p class="placeholder">${escapeHTML(t("noArts"))}</p>`;
+    return;
+  }
+
+  $grid.innerHTML = arts.map((a) => `
+    <button class="card" data-nav="/arts/${encodeURIComponent(a.file)}">
+      <div class="card-accent"></div>
+      <img class="card-cover" src="${escapeHTML(a.url)}" alt="${escapeHTML(a.title)}" loading="lazy">
+      <div class="card-title">${escapeHTML(a.title)}</div>
+    </button>`).join("");
+  bindNav();
+}
+
+// ── arts: detail ─────────────────────────────────────────────
+
+async function renderArtDetail(file) {
+  const arts = await fetchJSON("/api/arts");
+  const art = arts.find((a) => a.file === file);
+  if (!art) return navigate("/arts");
+
+  document.title = `${art.title} — Hardgrizz Comics`;
+  $app.innerHTML = `
+    <div class="view">
+      <div class="container">
+        <div class="section-header">
+          <button class="back-link" data-nav="/arts">← ${escapeHTML(t("backToArts"))}</button>
+        </div>
+      </div>
+      <div class="art-detail">
+        <img id="art-image" src="${escapeHTML(art.url)}" alt="${escapeHTML(art.title)}">
+        <h1 class="art-detail-title">${escapeHTML(art.title)}</h1>
+        ${art.description ? `<p class="art-detail-description">${escapeHTML(art.description)}</p>` : ""}
+        <button class="btn btn-yellow" id="art-fullscreen">${escapeHTML(t("fullscreen"))}</button>
+      </div>
+    </div>`;
+  bindNav();
+  setupFullscreenButton(document.getElementById("art-fullscreen"), document.getElementById("art-image"));
+}
+
+// ── nav delegation ───────────────────────────────────────────
+
+function bindNav() {
+  $app.querySelectorAll("[data-nav]").forEach((el) => {
+    el.addEventListener("click", () => navigate(el.dataset.nav));
+  });
 }
 
 // ── go ────────────────────────────────────────────────────────
 
-init();
+document.documentElement.lang = siteLang;
+renderLangToggle();
+render();
