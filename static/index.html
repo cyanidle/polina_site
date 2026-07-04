@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webcomic Reader</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <h1 id="logo">☽ Webcomic</h1>
+    <nav id="comic-list">
+      <p class="placeholder">Loading comics…</p>
+    </nav>
+  </aside>
+
+  <main id="reader">
+    <header id="reader-header">
+      <span id="comic-title">← pick a comic</span>
+      <span id="page-indicator"></span>
+    </header>
+
+    <div id="page-viewport">
+      <button id="btn-prev" class="nav-btn" title="Previous (←)">◀</button>
+      <div id="page-container">
+        <img id="page-image" src="" alt="" />
+      </div>
+      <button id="btn-next" class="nav-btn" title="Next (→)">▶</button>
+    </div>
+  </main>
+
+  <div id="lightbox" class="lightbox-hidden">
+    <img id="lightbox-image" src="" alt="" />
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
