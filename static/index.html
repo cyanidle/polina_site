@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Webcomic Reader</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- backdrop for mobile sidebar overlay -->
+  <div id="sidebar-backdrop" class="sidebar-backdrop-hidden"></div>
+
   <aside id="sidebar">
     <h1 id="logo">☽ Webcomic</h1>
     <nav id="comic-list">
@@ -16,6 +19,7 @@
 
   <main id="reader">
     <header id="reader-header">
+      <button id="btn-menu" class="hamburger" title="Comics list">☰</button>
       <span id="comic-title">← pick a comic</span>
       <span id="page-indicator"></span>
     </header>

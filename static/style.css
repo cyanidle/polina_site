@@ -15,6 +15,8 @@
 
 html, body {
   height: 100%;
+  /* prevent pull-to-refresh / overscroll on mobile while reading */
+  overscroll-behavior: none;
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   background: var(--clr-bg);
   color: var(--clr-text);
@@ -35,6 +37,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  z-index: 20;
 }
 
 #logo {
@@ -50,6 +53,8 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 8px 0;
+  /* smooth scrolling on iOS */
+  -webkit-overflow-scrolling: touch;
 }
 
 #comic-list .placeholder {
@@ -70,6 +75,8 @@ body {
   cursor: pointer;
   transition: background 0.15s;
   border-left: 3px solid transparent;
+  /* bigger tap target on mobile */
+  min-height: 44px;
 }
 
 .comic-item:hover {
@@ -89,20 +96,45 @@ body {
   font-weight: 400;
 }
 
+/* ── sidebar backdrop (mobile) ────────────────── */
+#sidebar-backdrop {
+  display: none;  /* hidden on desktop */
+}
+
+/* ── hamburger button ─────────────────────────── */
+.hamburger {
+  display: none;  /* hidden on desktop */
+  background: none;
+  border: none;
+  color: var(--clr-text);
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 4px 10px;
+  margin-right: 8px;
+  line-height: 1;
+  border-radius: var(--radius);
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.hamburger:hover {
+  background: var(--clr-hover);
+}
+
 /* ── reader ───────────────────────────────────── */
 #reader {
   flex: 1;
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;  /* dynamic viewport height for mobile browsers */
   overflow: hidden;
 }
 
 #reader-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--clr-border);
   background: var(--clr-surface);
   min-height: 50px;
@@ -111,11 +143,17 @@ body {
 #comic-title {
   font-weight: 600;
   font-size: 1.05rem;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #page-indicator {
   color: var(--clr-muted);
   font-size: 0.85rem;
+  margin-left: 12px;
+  white-space: nowrap;
 }
 
 /* ── page viewport ────────────────────────────── */
@@ -124,29 +162,32 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0;
   overflow: hidden;
   position: relative;
+  /* allow tap zones on edges for prev/next */
+  touch-action: manipulation;
 }
 
 #page-container {
   height: 100%;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  /* fill available space between nav buttons */
-  flex: 1;
-  padding: 16px;
+  padding: 8px;
 }
 
 #page-image {
   max-width: 100%;
-  max-height: calc(100vh - 50px);
+  max-height: 100%;
   object-fit: contain;
   border-radius: var(--radius);
   box-shadow: 0 2px 20px rgba(0,0,0,0.5);
   transition: opacity 0.2s;
+  /* prevent iOS image selection */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #page-image.loading {
@@ -166,17 +207,32 @@ body {
   color: #fff;
   font-size: 1.3rem;
   cursor: pointer;
-  opacity: 0;
   transition: opacity 0.2s, background 0.2s;
   border-radius: var(--radius);
+  /* prevent iOS double-tap zoom */
+  touch-action: manipulation;
 }
 
-#page-viewport:hover .nav-btn {
-  opacity: 1;
+/* Desktop: show on hover */
+@media (hover: hover) and (pointer: fine) {
+  .nav-btn {
+    opacity: 0;
+  }
+  #page-viewport:hover .nav-btn {
+    opacity: 1;
+  }
+  .nav-btn:hover {
+    background: rgba(0, 0, 0, 0.7);
+  }
 }
 
-.nav-btn:hover {
-  background: rgba(0, 0, 0, 0.7);
+/* Mobile / touch: always visible, semi-transparent */
+@media (hover: none) and (pointer: coarse) {
+  .nav-btn {
+    opacity: 0.55;
+    width: 40px;
+    height: 64px;
+  }
 }
 
 .nav-btn:disabled {
@@ -184,8 +240,19 @@ body {
   cursor: default;
 }
 
-#btn-prev { left: 12px; }
-#btn-next { right: 12px; }
+#btn-prev { left: 4px; }
+#btn-next { right: 4px; }
+
+/* ── tap zones (mobile fallback) ──────────────── */
+.tap-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  z-index: 5;
+}
+.tap-zone-left  { left: 0; }
+.tap-zone-right { right: 0; }
 
 /* ── lightbox (click to zoom) ─────────────────── */
 #lightbox {
@@ -202,6 +269,7 @@ body {
 #lightbox img {
   max-width: 95vw;
   max-height: 95vh;
+  max-height: 95dvh;
   object-fit: contain;
   box-shadow: 0 4px 40px rgba(0,0,0,0.6);
 }
@@ -227,3 +295,88 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--clr-border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+/* ════════════════════════════════════════════════
+   Mobile — ≤ 768 px
+   ════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+
+  /* Sidebar slides in from the left as an overlay */
+  #sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+    width: min(280px, 80vw);
+    min-width: 0;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 2px 0 20px rgba(0,0,0,0.6);
+  }
+
+  #sidebar.open {
+    transform: translateX(0);
+  }
+
+  /* Dark backdrop behind the open sidebar */
+  #sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 19;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+
+  #sidebar-backdrop.visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sidebar-backdrop-hidden {
+    /* kept for JS classList fallback but effectively unused now */
+  }
+
+  /* Show hamburger */
+  .hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Smaller header */
+  #reader-header {
+    padding: 6px 12px;
+    min-height: 44px;
+  }
+
+  #comic-title {
+    font-size: 0.95rem;
+  }
+
+  #page-indicator {
+    font-size: 0.78rem;
+    margin-left: 8px;
+  }
+
+  /* Full-bleed image on mobile */
+  #page-container {
+    padding: 0;
+  }
+
+  #page-image {
+    border-radius: 0;
+    box-shadow: none;
+    max-height: 100%;
+  }
+
+  /* Bigger nav buttons for thumbs */
+  .nav-btn {
+    width: 40px;
+    height: 64px;
+    font-size: 1.1rem;
+  }
+}
