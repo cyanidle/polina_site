@@ -61,6 +61,11 @@ const LANGS = ["ru", "en"];
 // discovery so it never gets treated as a chapter itself.
 const TEASER_DIRNAME = "teaser";
 
+// Reserved subdirectory under ARTS_DIR holding the character gallery
+// (one image per character + optional <name>.txt). It's a directory, so the
+// flat arts scan (isFile filter) skips it automatically.
+const CHARACTERS_DIRNAME = "characters";
+
 const IMAGE_EXTS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
 ]);
@@ -119,6 +124,13 @@ type ComicDetail = ComicSummary & {
 
 type Art = { file: string; title: string; description: string; url: string };
 
+// A character, scanned from arts/characters/<name>/ — a folder holding an
+// arbitrary number of images, each with an optional <image>.txt description.
+// `name` is the folder name and is what comic meta.json `characters[].name`
+// is matched against to make a comic's character label clickable.
+type CharacterImage = { file: string; url: string; description: string };
+type CharacterEntry = { name: string; cover: string; images: CharacterImage[] };
+
 function pickLocale(value: Localized | undefined, uiLang: string, fallbackLang: string): string {
   if (value == null) return "";
   if (typeof value === "string") return value;
@@ -131,8 +143,12 @@ function nativeTitle(c: ComicSummary): string {
   return pickLocale(c.title, c.lang, c.lang);
 }
 
-function resolveComicSummary(c: ComicSummary, uiLang: string) {
-  return { lang: c.lang, name: c.name, title: pickLocale(c.title, uiLang, c.lang), cover: c.cover };
+// Cached comics are full ComicDetail objects, so we can surface a total
+// page count in the summary — the frontend uses it to flag comics with
+// unread/new pages without fetching every comic's detail.
+function resolveComicSummary(c: ComicDetail, uiLang: string) {
+  const pages = c.chapters.reduce((n, ch) => n + ch.pages.length, 0);
+  return { lang: c.lang, name: c.name, title: pickLocale(c.title, uiLang, c.lang), cover: c.cover, pages };
 }
 
 function resolveComicDetail(c: ComicDetail, uiLang: string) {
@@ -143,7 +159,13 @@ function resolveComicDetail(c: ComicDetail, uiLang: string) {
     cover: c.cover,
     description: pickLocale(c.description, uiLang, c.lang),
     teaser: c.teaser,
-    characters: c.characters.map((ch) => ({ name: ch.name, about: pickLocale(ch.about, uiLang, c.lang) })),
+    // `link` is the gallery character's name (the arts/characters/<name>/
+    // folder) when a match exists, so the frontend can link the label to its
+    // page. Matched case-insensitively; the gallery's own casing is used.
+    characters: c.characters.map((ch) => {
+      const match = characters.find((g) => g.name.toLowerCase() === ch.name.toLowerCase());
+      return { name: ch.name, about: pickLocale(ch.about, uiLang, c.lang), link: match?.name };
+    }),
     chapters: c.chapters.map((ch) => ({
       name: ch.name,
       pages: ch.pages.map((p) => ({
@@ -164,6 +186,7 @@ function resolveComicDetail(c: ComicDetail, uiLang: string) {
 
 let comicsByLang: Record<string, ComicDetail[]> = {};
 let arts: Art[] = [];
+let characters: CharacterEntry[] = [];
 
 function urlFor(...segments: string[]): string {
   return "/" + segments.map(encodeURIComponent).join("/");
@@ -308,13 +331,46 @@ async function scanArts(): Promise<Art[]> {
   return result;
 }
 
+// Character gallery — arts/characters/<name>/ is one folder per character,
+// holding any number of images, each with an optional <image>.txt sidecar
+// for a per-picture description. The folder name is the character name; its
+// first image (natural sort) is the cover. Loose files directly under
+// arts/characters/ (not in a subfolder) and empty folders are ignored.
+async function scanCharacters(): Promise<CharacterEntry[]> {
+  const base = `${ARTS_DIR}/${CHARACTERS_DIRNAME}`;
+  const dirs = (await readDirSafe(base)).filter((e) => e.isDirectory).map((e) => e.name);
+  dirs.sort(naturalCompare);
+
+  const result: CharacterEntry[] = [];
+  for (const name of dirs) {
+    const dir = `${base}/${name}`;
+    const files = await readImageFiles(dir);
+    if (files.length === 0) continue;
+
+    const images: CharacterImage[] = [];
+    for (const file of files) {
+      const dot = file.lastIndexOf(".");
+      const bare = dot === -1 ? file : file.substring(0, dot);
+      let description = "";
+      try {
+        description = (await Deno.readTextFile(`${dir}/${bare}.txt`)).trim();
+      } catch { /* no sidecar */ }
+      images.push({ file, description, url: urlFor("arts", CHARACTERS_DIRNAME, name, file) });
+    }
+    result.push({ name, cover: images[0].url, images });
+  }
+  return result;
+}
+
 async function scan(): Promise<void> {
   console.log(`[comic-server] scanning ${COMICS_DIR} and ${ARTS_DIR}...`);
   const next: Record<string, ComicDetail[]> = {};
   for (const lang of LANGS) next[lang] = await scanComicsForLang(lang);
   comicsByLang = next;
   arts = await scanArts();
+  characters = await scanCharacters();
   console.log(`[comic-server]   + ${arts.length} art file(s) in ${ARTS_DIR}`);
+  console.log(`[comic-server]   + ${characters.length} character(s) in ${ARTS_DIR}/${CHARACTERS_DIRNAME}`);
 }
 
 // ── filesystem watcher ─────────────────────────────────────────
@@ -390,11 +446,15 @@ async function handle(req: Request): Promise<Response> {
 
   if (path === "/api/health") {
     const total = LANGS.reduce((n, l) => n + (comicsByLang[l]?.length ?? 0), 0);
-    return json({ status: "ok", comics: total, arts: arts.length });
+    return json({ status: "ok", comics: total, arts: arts.length, characters: characters.length });
   }
 
   if (path === "/api/arts") {
     return json(arts);
+  }
+
+  if (path === "/api/characters") {
+    return json(characters);
   }
 
   // /api/comics/<lang> -> summaries

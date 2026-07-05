@@ -48,7 +48,9 @@ h1, h2, h3, .display {
   position: fixed;
   top: 14px;
   right: 14px;
-  z-index: 200;
+  /* Above the 18+ age gate (z-index 1000) so language can be switched
+     while the gate is up — its text re-renders live on toggle. */
+  z-index: 1100;
   background: var(--clr-bg);
   border: 3px solid var(--clr-ink);
   color: var(--clr-ink);
@@ -274,6 +276,7 @@ h1, h2, h3, .display {
 }
 
 .card {
+  position: relative;
   border: 3px solid var(--clr-ink);
   background: var(--clr-bg);
   cursor: pointer;
@@ -314,6 +317,53 @@ h1, h2, h3, .display {
   padding: 12px 14px;
   text-transform: uppercase;
   line-height: 1.2;
+}
+
+/* ── "new / unread" star badge ─────────────────────────────── */
+/* Yellow spiky starburst with a black "!", flagging unread comics/pages
+   and unvisited art. Rendered inline (SVG) by newBadge() in app.js. */
+.new-badge {
+  display: inline-flex;
+  width: 2.2rem;
+  height: 2.2rem;
+  pointer-events: none;
+  filter: drop-shadow(2px 2px 0 var(--clr-ink));
+}
+.new-badge svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* On a card: pinned to the top-right over the cover. The card clips its
+   overflow, so keep the badge inside the box (positive offsets). */
+.card .new-badge {
+  position: absolute;
+  top: 14px;
+  right: 12px;
+  z-index: 3;
+}
+
+/* On the landing buttons: overhang the top-right corner. */
+.landing-buttons .btn {
+  position: relative;
+  overflow: visible;
+}
+.landing-buttons .btn .new-badge {
+  position: absolute;
+  top: -1rem;
+  right: -1rem;
+  width: 2.4rem;
+  height: 2.4rem;
+  z-index: 3;
+}
+
+/* On the comic-detail title: inline next to the heading text. */
+.comic-title .new-badge {
+  width: 1.8rem;
+  height: 1.8rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
 }
 
 /* reading-progress indicator, shown when localStorage has saved a position */
@@ -500,6 +550,26 @@ h1, h2, h3, .display {
   font-size: 0.85rem;
   text-transform: uppercase;
   margin-bottom: 4px;
+}
+
+/* Clickable character name (button element) — links to its gallery page
+   when a matching arts/characters/ entry exists. Strip button chrome and
+   present it as an underlined red link. */
+.character-link {
+  display: inline-block;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--clr-red);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+.character-link:hover {
+  color: var(--clr-ink);
+  background: var(--clr-yellow);
 }
 
 .character-about {
@@ -738,6 +808,44 @@ h1, h2, h3, .display {
   white-space: pre-wrap;
 }
 
+/* ── character detail: gallery of images + per-picture captions ── */
+.character-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  align-items: center;
+  padding: 12px 0 40px;
+}
+
+.character-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 720px;
+  width: 100%;
+}
+
+.character-figure-img {
+  max-width: min(90vw, 720px);
+  max-height: 80vh;
+  object-fit: contain;
+  border: 3px solid var(--clr-ink);
+  box-shadow: 6px 6px 0 var(--clr-ink);
+}
+
+.character-figure-caption {
+  font-family: "Archivo", sans-serif;
+  font-weight: 500;
+  font-size: 0.95rem;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.6;
+  max-width: 640px;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
 /* ── mobile ────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .reader-nav { width: 44px; height: 64px; }
@@ -750,4 +858,77 @@ h1, h2, h3, .display {
   .reader-header { padding-right: 92px; flex-wrap: wrap; }
   .section-header { padding-right: 92px; }
   .fullscreen-btn { font-size: 0.68rem; padding: 6px 8px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   18+ disclaimer footer + first-visit age gate
+   ══════════════════════════════════════════════════════════════ */
+
+.site-disclaimer {
+  border-top: 3px solid var(--clr-ink);
+  padding: 20px 24px;
+  text-align: center;
+  font-family: "Archivo", sans-serif;
+  font-weight: 900;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--clr-ink);
+}
+.site-disclaimer:empty { display: none; }
+
+/* Full-screen gate shown once, before content, on the first visit. */
+.age-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 17, 17, 0.88);
+}
+
+.age-gate-box {
+  background: var(--clr-bg);
+  border: 3px solid var(--clr-ink);
+  box-shadow: 8px 8px 0 var(--clr-ink);
+  padding: 32px 28px;
+  max-width: 460px;
+  width: 100%;
+  text-align: center;
+}
+
+.age-gate-badge {
+  display: inline-block;
+  background: var(--clr-red);
+  color: #fff;
+  font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
+  font-size: 1.6rem;
+  line-height: 1;
+  padding: 10px 16px;
+  border: 3px solid var(--clr-ink);
+  box-shadow: 4px 4px 0 var(--clr-ink);
+  margin-bottom: 20px;
+}
+
+.age-gate-text {
+  font-family: "Archivo", sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.4;
+  margin-bottom: 24px;
+}
+
+.age-gate-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 600px) {
+  .age-gate-actions { flex-direction: column; }
+  .age-gate-actions .btn { width: 100%; }
 }

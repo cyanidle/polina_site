@@ -37,15 +37,20 @@ COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --
 
 ## Site structure
 
-- **Landing** — welcome text, two buttons: "Комиксы" / "Арты".
+- **Landing** — welcome text, three buttons: "Комиксы" / "Арты" / "Персонажи".
 - **Арты** — grid of art with titles; click to open enlarged with description.
+- **Персонажи** — grid of characters (cover + name) from `arts/characters/`; each character is a folder of images, and opening one shows the whole gallery with a caption under each picture.
 - **Комиксы** — grid of comics (cover + title) for the currently selected language; opening it drops straight into the list (no language-picker step). The RU/EN corner toggle switches which language's collection is listed.
-- **Comic page** — carousel (cover + `teaser/` images), navigable by click/dots/swipe; title, description, chapter picker, "Читать с начала", character list.
+- **Comic page** — carousel (cover + `teaser/` images), navigable by click/dots/swipe; title, description, chapter picker, "Читать с начала", character list. A character's name is a link to its page when a matching image exists in `arts/characters/`.
 - **Reader** — one page at a time, arrow navigation (click/keyboard/swipe), page-jump field, fullscreen mode (button or <kbd>F</kbd>), author comment + publish date per page if set.
+
+On a visitor's **first arrival** an 18+ age gate is shown ("I am 18 or older" to enter, "Leave" to exit); the choice is remembered in `localStorage` so it only appears once. A short "18+" disclaimer footer is shown on every page.
 
 The whole UI is bilingual (RU/EN) via a corner toggle, which also selects which comic collection (`comics/ru/` vs `comics/en/`) the list shows. Comic text (title, description, character bios, page comments) can be translated within a single `meta.json` instead of duplicating the comic under both `comics/ru/` and `comics/en/` — see `UPLOADING.md`.
 
 Reading progress (chapter + page) is saved per comic in the browser's `localStorage` — the comic page shows a "Continue reading" button and progress bar, and the comics grid shows a thin progress bar under any comic you've started. This is per-browser, not synced anywhere.
+
+Unread content is flagged with a yellow pointy-star badge (a black `!` inside): on the landing page's "Комиксы" / "Арты" buttons (if anything is unread), on each comic card and art card, and on a comic's page (when it has pages you haven't read). A comic counts as unread until you've seen every page — including pages added after you'd already finished it — and an artwork until you've opened it once. Like reading progress, this is tracked per-browser in `localStorage`, not synced.
 
 ## Content layout
 
@@ -58,6 +63,8 @@ comics/ru/<comic>/meta.json                 optional: title, description, cover,
 comics/en/...                                same, for the English version
 arts/<file>                                  a piece of art
 arts/<file>.txt                              optional description sidecar
+arts/characters/<name>/<image>               a character = one folder of images
+arts/characters/<name>/<image>.txt           optional per-image description sidecar
 ```
 
 Details and examples: **[UPLOADING.md](UPLOADING.md)**.
@@ -78,10 +85,11 @@ deno.json        deno task "dev"; also enables editor Deno support
 
 API (served from an in-memory cache kept fresh by `Deno.watchFs`):
 
-- `GET /api/health` — `{status, comics, arts}` counts
-- `GET /api/comics/<lang>` — list of `{lang, name, title, cover}` (lang: `ru` or `en`)
-- `GET /api/comics/<lang>/<name>` — full comic: description, teaser, characters, chapters (each page has `file`, `url`, optional `comment`/`date`)
+- `GET /api/health` — `{status, comics, arts, characters}` counts
+- `GET /api/comics/<lang>` — list of `{lang, name, title, cover, pages}` (lang: `ru` or `en`)
+- `GET /api/comics/<lang>/<name>` — full comic: description, teaser, characters (each character has `name`, optional `about`, and `file` when a matching `arts/characters/` entry exists), chapters (each page has `file`, `url`, optional `comment`/`date`)
 - `GET /api/arts` — list of `{file, title, description, url}`
+- `GET /api/characters` — list of `{name, cover, images: [{file, url, description}]}` from `arts/characters/<name>/` (one folder per character)
 
 Both comics endpoints accept an optional `?uiLang=ru|en` query param to resolve any translated (`{"ru": "...", "en": "..."}`) text fields in `meta.json`; it defaults to `<lang>` if omitted.
 

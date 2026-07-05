@@ -12,12 +12,15 @@ const STRINGS = {
   welcomeText: { ru: "Комиксы и рисунки.", en: "Comics and art.", },
   comics: { ru: "Комиксы", en: "Comics", },
   arts: { ru: "Арты", en: "Arts", },
+  charactersTab: { ru: "Персонажи", en: "Characters", },
   readFromStart: { ru: "Читать с начала", en: "Read from the start", },
   chapters: { ru: "Главы", en: "Chapters", },
   characters: { ru: "Персонажи", en: "Characters", },
   back: { ru: "Назад", en: "Back", },
   backToComics: { ru: "К комиксам", en: "Back to comics", },
   backToArts: { ru: "К артам", en: "Back to arts", },
+  backToCharacters: { ru: "К персонажам", en: "Back to characters", },
+  noCharacters: { ru: "Персонажи пока не добавлены.", en: "No characters yet.", },
   backToComic: { ru: "К странице комикса", en: "Back to comic page", },
   home: { ru: "На главную", en: "Home", },
   noComics: { ru: "Комиксы пока не добавлены.", en: "No comics yet.", },
@@ -29,6 +32,23 @@ const STRINGS = {
   fullscreen: { ru: "На весь экран", en: "Fullscreen", },
   exitFullscreen: { ru: "Свернуть", en: "Exit fullscreen", },
   continueReading: { ru: "Продолжить чтение", en: "Continue reading", },
+  disclaimer: {
+    ru: "Этот контент предназначен только для взрослой аудитории 18+",
+    en: "This content is intended for mature audiences only 18+",
+  },
+  ageTitle: { ru: "18+", en: "18+", },
+  ageText: {
+    ru: "Этот сайт содержит материалы, предназначенные только для взрослых. Вам исполнилось 18 лет?",
+    en: "This site contains content intended for mature audiences only. Are you 18 or older?",
+  },
+  ageConfirm: { ru: "Мне есть 18", en: "I am 18 or older", },
+  ageLeave: { ru: "Выйти", en: "Leave", },
+  prev: { ru: "Назад", en: "Previous", },
+  next: { ru: "Вперёд", en: "Next", },
+  newComics: { ru: "Есть новые комиксы", en: "New comics", },
+  newArts: { ru: "Есть новые работы", en: "New art", },
+  newPages: { ru: "Есть новые страницы", en: "New pages", },
+  newItem: { ru: "Новое", en: "New", },
 };
 
 // Language lives in the URL query string (`?lang=ru|en`) so it is
@@ -61,7 +81,59 @@ function setSiteLang(lang) {
   syncUrlLang();
   document.documentElement.lang = lang;
   renderLangToggle();
+  renderDisclaimer();
+  renderAgeGate(); // re-render the gate's text if it's still up
   render();
+}
+
+// ── disclaimer + 18+ age gate ─────────────────────────────────
+
+// Persistent footer shown on every page.
+function renderDisclaimer() {
+  const footer = document.getElementById("site-footer");
+  if (footer) footer.textContent = t("disclaimer");
+}
+
+// Shown once, on the visitor's first arrival (until they confirm). The
+// choice is remembered in localStorage so it never blocks a return visit.
+function ageConfirmed() {
+  return localStorage.getItem("ageConfirmed") === "yes";
+}
+
+function renderAgeGate() {
+  const existing = document.getElementById("age-gate");
+  if (ageConfirmed()) { existing?.remove(); return; }
+  if (existing) {
+    // Already open — just refresh its text for the current language.
+    existing.querySelector(".age-gate-text").textContent = t("ageText");
+    existing.querySelector("#age-confirm").textContent = t("ageConfirm");
+    existing.querySelector("#age-leave").textContent = t("ageLeave");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.id = "age-gate";
+  overlay.className = "age-gate";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", t("ageTitle"));
+  overlay.innerHTML = `
+    <div class="age-gate-box">
+      <div class="age-gate-badge">18+</div>
+      <p class="age-gate-text">${escapeHTML(t("ageText"))}</p>
+      <div class="age-gate-actions">
+        <button class="btn btn-red" id="age-confirm">${escapeHTML(t("ageConfirm"))}</button>
+        <button class="btn btn-ghost" id="age-leave">${escapeHTML(t("ageLeave"))}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#age-confirm").addEventListener("click", () => {
+    localStorage.setItem("ageConfirmed", "yes");
+    overlay.remove();
+  });
+  overlay.querySelector("#age-leave").addEventListener("click", () => {
+    // Send anyone under 18 away from the site.
+    location.href = "https://www.google.com/";
+  });
 }
 
 function renderLangToggle() {
@@ -117,11 +189,80 @@ function getProgress(lang, name) {
 function saveProgress(lang, name, chapterIdx, pageIdx, comic) {
   const totalPages = comic.chapters.reduce((n, c) => n + c.pages.length, 0);
   const pagesBefore = comic.chapters.slice(0, chapterIdx).reduce((n, c) => n + c.pages.length, 0);
-  const fraction = totalPages > 0 ? (pagesBefore + pageIdx + 1) / totalPages : 0;
+  const flatSeen = pagesBefore + pageIdx + 1;
+  const fraction = totalPages > 0 ? flatSeen / totalPages : 0;
 
   const all = loadAllProgress();
-  all[progressKey(lang, name)] = { chapterIdx, pageIdx, fraction, updatedAt: Date.now() };
+  const prev = all[progressKey(lang, name)];
+  // seenPages is the furthest page reached (monotonic — going back doesn't
+  // lower it) so a comic only counts as fully-read once every page is seen.
+  const seenPages = Math.max(flatSeen, prev?.seenPages ?? 0);
+  all[progressKey(lang, name)] = { chapterIdx, pageIdx, fraction, seenPages, totalPages, updatedAt: Date.now() };
   localStorage.setItem("readingProgress", JSON.stringify(all));
+}
+
+// ── "new / unread" tracking ───────────────────────────────────
+//
+// A comic has unread content if it was never opened, isn't finished, or has
+// gained pages since it was last fully read (seenPages < current total). An
+// art is "new" until its detail page has been opened. Both are stored client-
+// side only, like reading progress — no server involvement.
+
+// A comic is unread when the furthest page seen is behind the current total.
+// `totalPages` comes from the comics-summary API (added server-side); when a
+// count isn't available, fall back to the saved fraction.
+function comicHasUnread(lang, name, totalPages) {
+  const p = getProgress(lang, name);
+  if (!p) return true; // never opened → brand-new comic
+  if (typeof totalPages === "number" && totalPages > 0) {
+    const seen = p.seenPages ?? Math.round((p.fraction ?? 0) * totalPages);
+    return seen < totalPages;
+  }
+  return (p.fraction ?? 0) < 1;
+}
+
+function loadVisitedArts() {
+  try {
+    return JSON.parse(localStorage.getItem("visitedArts") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function isArtVisited(file) {
+  return !!loadVisitedArts()[file];
+}
+
+function markArtVisited(file) {
+  const all = loadVisitedArts();
+  if (all[file]) return;
+  all[file] = Date.now();
+  localStorage.setItem("visitedArts", JSON.stringify(all));
+}
+
+// ── "new" badge (yellow pointy star with a black "!") ─────────
+
+// Build a spiky starburst polygon once, reused by every badge.
+function burstPoints(spikes, outer, inner, cx, cy) {
+  const pts = [];
+  const step = Math.PI / spikes;
+  for (let i = 0; i < spikes * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = i * step - Math.PI / 2;
+    pts.push(`${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`);
+  }
+  return pts.join(" ");
+}
+const _burstPoints = burstPoints(12, 48, 37, 50, 50);
+
+function newBadge(labelKey) {
+  const label = t(labelKey || "newItem");
+  return `<span class="new-badge" role="img" aria-label="${escapeHTML(label)}" title="${escapeHTML(label)}">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <polygon points="${_burstPoints}" fill="var(--clr-yellow)" stroke="var(--clr-ink)" stroke-width="5" stroke-linejoin="round"></polygon>
+      <text x="50" y="53" text-anchor="middle" dominant-baseline="central" font-family="'Archivo Black', 'Archivo', sans-serif" font-weight="900" font-size="54" fill="var(--clr-ink)">!</text>
+    </svg>
+  </span>`;
 }
 
 // ── fullscreen ───────────────────────────────────────────────
@@ -189,7 +330,7 @@ async function render() {
   renderLangToggle();
 
   try {
-    if (route.length === 0) return renderLanding();
+    if (route.length === 0) return await renderLanding();
     // The comic list always reflects the current RU/EN switch (siteLang),
     // not a lang embedded in the URL — opening comics drops straight into
     // the list, no language-picker step. `#/comics/<lang>` (length 2) is a
@@ -201,6 +342,8 @@ async function render() {
     }
     if (route[0] === "arts" && route.length === 1) return await renderArtsGrid();
     if (route[0] === "arts" && route.length === 2) return await renderArtDetail(route[1]);
+    if (route[0] === "characters" && route.length === 1) return await renderCharactersGrid();
+    if (route[0] === "characters" && route.length === 2) return await renderCharacterDetail(route[1]);
   } catch (err) {
     console.error(err);
     $app.innerHTML = `<div class="view"><p class="placeholder">${escapeHTML(t("error"))}</p></div>`;
@@ -226,7 +369,7 @@ function landingShapes() {
 
 // ── landing ──────────────────────────────────────────────────
 
-function renderLanding() {
+async function renderLanding() {
   document.title = "Hardgrizz Comics";
   $app.innerHTML = `
     <div class="view landing">
@@ -237,10 +380,28 @@ function renderLanding() {
         <div class="landing-buttons">
           <button class="btn btn-red" data-nav="/comics">${escapeHTML(t("comics"))}</button>
           <button class="btn btn-blue" data-nav="/arts">${escapeHTML(t("arts"))}</button>
+          <button class="btn btn-yellow" data-nav="/characters">${escapeHTML(t("charactersTab"))}</button>
         </div>
       </div>
     </div>`;
   bindNav();
+
+  // Flag whether any comic (in the current language) or any art is unread,
+  // and stamp a badge on the corresponding button. Best-effort: a failed
+  // fetch just leaves the landing page badge-free rather than erroring out.
+  try {
+    const [comics, arts] = await Promise.all([
+      fetchJSON(`/api/comics/${encodeURIComponent(siteLang)}?uiLang=${encodeURIComponent(siteLang)}`).catch(() => []),
+      fetchJSON("/api/arts").catch(() => []),
+    ]);
+    if (location.hash.replace(/^#\/?/, "") !== "") return; // navigated away meanwhile
+    const anyComic = comics.some((c) => comicHasUnread(siteLang, c.name, c.pages));
+    const anyArt = arts.some((a) => !isArtVisited(a.file));
+    const $comicsBtn = $app.querySelector('[data-nav="/comics"]');
+    const $artsBtn = $app.querySelector('[data-nav="/arts"]');
+    if (anyComic && $comicsBtn) $comicsBtn.insertAdjacentHTML("beforeend", newBadge("newComics"));
+    if (anyArt && $artsBtn) $artsBtn.insertAdjacentHTML("beforeend", newBadge("newArts"));
+  } catch { /* leave landing badge-free on error */ }
 }
 
 // ── comics: grid ─────────────────────────────────────────────
@@ -271,8 +432,10 @@ async function renderComicsGrid(lang) {
 
   $grid.innerHTML = comics.map((c) => {
     const progress = getProgress(lang, c.name);
+    const unread = comicHasUnread(lang, c.name, c.pages);
     return `
     <button class="card" data-nav="/comics/${encPath(lang, c.name)}">
+      ${unread ? newBadge("newItem") : ""}
       <div class="card-accent"></div>
       <img class="card-cover" src="${escapeHTML(c.cover)}" alt="${escapeHTML(c.title)}" loading="lazy">
       <div class="card-title">${escapeHTML(c.title)}</div>
@@ -290,6 +453,8 @@ async function renderComicDetail(lang, name) {
 
   const carouselImages = [comic.cover, ...comic.teaser.filter((u) => u !== comic.cover)];
   const progress = getProgress(lang, name);
+  const totalPages = comic.chapters.reduce((n, c) => n + c.pages.length, 0);
+  const unread = comicHasUnread(lang, name, totalPages);
 
   $app.innerHTML = `
     <div class="view comic-detail">
@@ -304,15 +469,15 @@ async function renderComicDetail(lang, name) {
               <img id="carousel-img" src="${escapeHTML(carouselImages[0])}" alt="${escapeHTML(comic.title)}">
             </div>
             ${carouselImages.length > 1 ? `
-              <button class="carousel-nav carousel-prev" aria-label="prev">‹</button>
-              <button class="carousel-nav carousel-next" aria-label="next">›</button>
+              <button class="carousel-nav carousel-prev" aria-label="${escapeHTML(t("prev"))}">‹</button>
+              <button class="carousel-nav carousel-next" aria-label="${escapeHTML(t("next"))}">›</button>
               <div class="carousel-dots">
                 ${carouselImages.map((_, i) => `<span class="carousel-dot${i === 0 ? " active" : ""}" data-dot="${i}"></span>`).join("")}
               </div>` : ""}
           </div>
 
           <div class="comic-info">
-            <h1 class="comic-title">${escapeHTML(comic.title)}</h1>
+            <h1 class="comic-title">${escapeHTML(comic.title)}${unread ? newBadge("newPages") : ""}</h1>
             ${comic.description ? `<p class="comic-description">${escapeHTML(comic.description)}</p>` : ""}
 
             ${progress ? `
@@ -340,7 +505,9 @@ async function renderComicDetail(lang, name) {
             <div class="characters-list">
               ${comic.characters.map((ch) => `
                 <div class="character-card">
-                  <div class="character-name">${escapeHTML(ch.name)}</div>
+                  ${ch.link
+                    ? `<button class="character-name character-link" data-nav="/characters/${encodeURIComponent(ch.link)}">${escapeHTML(ch.name)}</button>`
+                    : `<div class="character-name">${escapeHTML(ch.name)}</div>`}
                   ${ch.about ? `<div class="character-about">${escapeHTML(ch.about)}</div>` : ""}
                 </div>
               `).join("")}
@@ -463,9 +630,9 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
       </div>
 
       <div class="reader-viewport" id="reader-viewport">
-        <button class="reader-nav reader-prev" id="reader-prev" ${prevDisabled ? "disabled" : ""}>‹</button>
+        <button class="reader-nav reader-prev" id="reader-prev" aria-label="${escapeHTML(t("prev"))}" ${prevDisabled ? "disabled" : ""}>‹</button>
         <img id="reader-image" src="${escapeHTML(page.url)}" alt="${escapeHTML(page.file)}">
-        <button class="reader-nav reader-next" id="reader-next" ${nextDisabled ? "disabled" : ""}>›</button>
+        <button class="reader-nav reader-next" id="reader-next" aria-label="${escapeHTML(t("next"))}" ${nextDisabled ? "disabled" : ""}>›</button>
       </div>
 
       <div class="reader-footer">
@@ -572,6 +739,7 @@ async function renderArtsGrid() {
 
   $grid.innerHTML = arts.map((a) => `
     <button class="card" data-nav="/arts/${encodeURIComponent(a.file)}">
+      ${isArtVisited(a.file) ? "" : newBadge("newItem")}
       <div class="card-accent"></div>
       <img class="card-cover" src="${escapeHTML(a.url)}" alt="${escapeHTML(a.title)}" loading="lazy">
       <div class="card-title">${escapeHTML(a.title)}</div>
@@ -586,6 +754,7 @@ async function renderArtDetail(file) {
   const art = arts.find((a) => a.file === file);
   if (!art) return navigate("/arts");
 
+  markArtVisited(file);
   document.title = `${art.title} — Hardgrizz Comics`;
   $app.innerHTML = `
     <div class="view">
@@ -605,6 +774,69 @@ async function renderArtDetail(file) {
   setupFullscreenButton(document.getElementById("art-fullscreen"), $app);
 }
 
+// ── characters: grid ─────────────────────────────────────────
+
+async function renderCharactersGrid() {
+  document.title = `${t("charactersTab")} — Hardgrizz Comics`;
+  $app.innerHTML = `
+    <div class="view">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">${escapeHTML(t("charactersTab"))}</h2>
+          <button class="back-link" data-nav="/">← ${escapeHTML(t("home"))}</button>
+        </div>
+        <div class="grid" id="characters-grid">
+          <p class="placeholder">${escapeHTML(t("loading"))}</p>
+        </div>
+      </div>
+    </div>`;
+  bindNav();
+
+  const chars = await fetchJSON("/api/characters");
+  const $grid = document.getElementById("characters-grid");
+
+  if (chars.length === 0) {
+    $grid.innerHTML = `<p class="placeholder">${escapeHTML(t("noCharacters"))}</p>`;
+    return;
+  }
+
+  $grid.innerHTML = chars.map((c) => `
+    <button class="card" data-nav="/characters/${encodeURIComponent(c.name)}">
+      <div class="card-accent"></div>
+      <img class="card-cover" src="${escapeHTML(c.cover)}" alt="${escapeHTML(c.name)}" loading="lazy">
+      <div class="card-title">${escapeHTML(c.name)}</div>
+    </button>`).join("");
+  bindNav();
+}
+
+// ── characters: detail ───────────────────────────────────────
+
+async function renderCharacterDetail(name) {
+  const chars = await fetchJSON("/api/characters");
+  const character = chars.find((c) => c.name === name);
+  if (!character) return navigate("/characters");
+
+  document.title = `${character.name} — Hardgrizz Comics`;
+  $app.innerHTML = `
+    <div class="view">
+      <div class="container">
+        <div class="section-header">
+          <h2 class="section-title">${escapeHTML(character.name)}</h2>
+          <button class="back-link" data-nav="/characters">← ${escapeHTML(t("backToCharacters"))}</button>
+        </div>
+        <div class="character-gallery">
+          ${character.images.map((img) => `
+            <figure class="character-figure">
+              <img class="character-figure-img" src="${escapeHTML(img.url)}" alt="${escapeHTML(character.name)}" loading="lazy">
+              ${img.description ? `<figcaption class="character-figure-caption">${escapeHTML(img.description)}</figcaption>` : ""}
+            </figure>
+          `).join("")}
+        </div>
+      </div>
+    </div>`;
+  bindNav();
+}
+
 // ── nav delegation ───────────────────────────────────────────
 
 function bindNav() {
@@ -619,4 +851,6 @@ document.documentElement.lang = siteLang;
 localStorage.setItem("siteLang", siteLang);
 syncUrlLang();
 renderLangToggle();
+renderDisclaimer();
+renderAgeGate();
 render();
