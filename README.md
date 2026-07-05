@@ -15,7 +15,7 @@ mkdir -p "comics/ru/Мой комикс"
 cp page1.png page2.png "comics/ru/Мой комикс/"
 
 # 3. Run the server from the repo root
-deno run --allow-net --allow-read --allow-env server.ts
+deno run --allow-net --allow-read server.ts
 # or: deno task dev
 ```
 
@@ -24,10 +24,10 @@ Open http://127.0.0.1:8080 — done.
 Custom host/port:
 
 ```bash
-deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090
+deno run --allow-net --allow-read server.ts 0.0.0.0 9090
 ```
 
-Custom content locations (e.g. content stored outside the repo):
+Custom content locations (e.g. content stored outside the repo) — needs `--allow-env` too, otherwise the variables are silently ignored and defaults are used:
 
 ```bash
 COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --allow-env server.ts
@@ -93,7 +93,7 @@ sudo cp nginx.conf /etc/nginx/sites-available/comic
 sudo ln -s /etc/nginx/sites-available/comic /etc/nginx/sites-enabled/
 # edit server_name and the /path/to/polina_site paths in the config
 sudo nginx -t && sudo nginx -s reload
-deno run --allow-net --allow-read --allow-env server.ts   # stays on 127.0.0.1:8080
+deno run --allow-net --allow-read server.ts   # stays on 127.0.0.1:8080
 ```
 
 The frontend uses the same relative URLs either way, so nothing else changes.

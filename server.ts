@@ -29,22 +29,35 @@
  * the comic's own <lang>, then to whichever translation exists).
  *
  * Architecture:
- *   - dev:  `deno run --allow-net --allow-read --allow-env server.ts`
+ *   - dev:  `deno run --allow-net --allow-read server.ts`
  *   - prod: run on 127.0.0.1:8080 behind nginx (see nginx.conf).
  *
  * Usage:
- *   deno run --allow-net --allow-read --allow-env server.ts                # 127.0.0.1:8080
- *   deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090   # custom host/port
+ *   deno run --allow-net --allow-read server.ts                    # 127.0.0.1:8080
+ *   deno run --allow-net --allow-read server.ts 0.0.0.0 9090       # custom host/port
  *
- * Env vars (optional):
+ * Env vars (optional, need --allow-env to take effect — silently ignored
+ * without it, since checking for them shouldn't force that permission on
+ * every deployment):
  *   COMICS_DIR   where comics/ content lives — absolute, or relative to cwd (default "comics")
  *   ARTS_DIR     where arts/ content lives — absolute, or relative to cwd (default "arts")
  */
 
 const ROOT = Deno.cwd() + "/";
 
+// Reading an env var still requires --allow-env even to check whether it's
+// set. Since these overrides are optional, don't force that permission on
+// every deployment — treat "not allowed to check" the same as "not set".
+function readEnv(name: string): string | undefined {
+  try {
+    return Deno.env.get(name);
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveDir(envVarName: string, defaultName: string): string {
-  const configured = Deno.env.get(envVarName)?.replace(/\/+$/, "");
+  const configured = readEnv(envVarName)?.replace(/\/+$/, "");
   if (!configured) return `${ROOT}${defaultName}`;
   return configured.startsWith("/") ? configured : `${ROOT}${configured}`;
 }
