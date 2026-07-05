@@ -29,17 +29,28 @@
  * the comic's own <lang>, then to whichever translation exists).
  *
  * Architecture:
- *   - dev:  `deno run --allow-net --allow-read server.ts`
+ *   - dev:  `deno run --allow-net --allow-read --allow-env server.ts`
  *   - prod: run on 127.0.0.1:8080 behind nginx (see nginx.conf).
  *
  * Usage:
- *   deno run --allow-net --allow-read server.ts                    # 127.0.0.1:8080
- *   deno run --allow-net --allow-read server.ts 0.0.0.0 9090       # custom host/port
+ *   deno run --allow-net --allow-read --allow-env server.ts                # 127.0.0.1:8080
+ *   deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090   # custom host/port
+ *
+ * Env vars (optional):
+ *   COMICS_DIR   where comics/ content lives — absolute, or relative to cwd (default "comics")
+ *   ARTS_DIR     where arts/ content lives — absolute, or relative to cwd (default "arts")
  */
 
 const ROOT = Deno.cwd() + "/";
-const COMICS_DIR = `${ROOT}comics`;
-const ARTS_DIR = `${ROOT}arts`;
+
+function resolveDir(envVarName: string, defaultName: string): string {
+  const configured = Deno.env.get(envVarName)?.replace(/\/+$/, "");
+  if (!configured) return `${ROOT}${defaultName}`;
+  return configured.startsWith("/") ? configured : `${ROOT}${configured}`;
+}
+
+const COMICS_DIR = resolveDir("COMICS_DIR", "comics");
+const ARTS_DIR = resolveDir("ARTS_DIR", "arts");
 const STATIC_DIR = `${ROOT}static`;
 
 const LANGS = ["ru", "en"];

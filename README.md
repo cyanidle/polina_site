@@ -15,7 +15,7 @@ mkdir -p "comics/ru/Мой комикс"
 cp page1.png page2.png "comics/ru/Мой комикс/"
 
 # 3. Run the server from the repo root
-deno run --allow-net --allow-read server.ts
+deno run --allow-net --allow-read --allow-env server.ts
 # or: deno task dev
 ```
 
@@ -24,8 +24,16 @@ Open http://127.0.0.1:8080 — done.
 Custom host/port:
 
 ```bash
-deno run --allow-net --allow-read server.ts 0.0.0.0 9090
+deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090
 ```
+
+Custom content locations (e.g. content stored outside the repo):
+
+```bash
+COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --allow-env server.ts
+```
+
+`COMICS_DIR`/`ARTS_DIR` accept absolute paths or paths relative to the working directory; they default to `comics`/`arts` under the repo root.
 
 ## Site structure
 
@@ -85,10 +93,22 @@ sudo cp nginx.conf /etc/nginx/sites-available/comic
 sudo ln -s /etc/nginx/sites-available/comic /etc/nginx/sites-enabled/
 # edit server_name and the /path/to/polina_site paths in the config
 sudo nginx -t && sudo nginx -s reload
-deno run --allow-net --allow-read server.ts   # stays on 127.0.0.1:8080
+deno run --allow-net --allow-read --allow-env server.ts   # stays on 127.0.0.1:8080
 ```
 
 The frontend uses the same relative URLs either way, so nothing else changes.
+
+## Running as a service
+
+`start.sh` launches the server (`deno run ...`); `comic-server.service` is a systemd unit that runs `start.sh`, so systemd manages a shell script rather than calling `deno` directly:
+
+```bash
+# edit WorkingDirectory / ExecStart in comic-server.service first
+sudo cp comic-server.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now comic-server
+journalctl -u comic-server -f   # logs
+```
 
 ## Deploying updates
 
