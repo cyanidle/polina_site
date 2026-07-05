@@ -32,19 +32,21 @@ deno run --allow-net --allow-read server.ts 0.0.0.0 9090
 - **Landing** — welcome text, two buttons: "Комиксы" / "Арты".
 - **Арты** — grid of art with titles; click to open enlarged with description.
 - **Комиксы** → pick **Русский** / **English** → grid of comics (cover + title) in that language.
-- **Comic page** — carousel (cover + teaser pages), title, description, chapter picker, "Читать с начала", character list.
+- **Comic page** — carousel (cover + `teaser/` images), navigable by click/dots/swipe; title, description, chapter picker, "Читать с начала", character list.
 - **Reader** — one page at a time, arrow navigation (click/keyboard/swipe), page-jump field, fullscreen mode (button or <kbd>F</kbd>), author comment + publish date per page if set.
 
 The whole UI is bilingual (RU/EN) via a corner toggle; picking a language in the comics section also switches the UI language. Comic text (title, description, character bios, page comments) can be translated within a single `meta.json` instead of duplicating the comic under both `comics/ru/` and `comics/en/` — see `UPLOADING.md`.
+
+Reading progress (chapter + page) is saved per comic in the browser's `localStorage` — the comic page shows a "Continue reading" button and progress bar, and the comics grid shows a thin progress bar under any comic you've started. This is per-browser, not synced anywhere.
 
 ## Content layout
 
 ```
 comics/ru/<comic>/<page files>              single-chapter comic
 comics/ru/<comic>/<chapter>/<page files>    multi-chapter comic
+comics/ru/<comic>/teaser/<image files>      optional carousel images (not chapter pages)
 comics/ru/<comic>/meta.json                 optional: title, description, cover,
-                                             teaser pages, characters, per-page
-                                             comments/dates
+                                             characters, per-page comments/dates
 comics/en/...                                same, for the English version
 arts/<file>                                  a piece of art
 arts/<file>.txt                              optional description sidecar
@@ -87,3 +89,12 @@ deno run --allow-net --allow-read server.ts   # stays on 127.0.0.1:8080
 ```
 
 The frontend uses the same relative URLs either way, so nothing else changes.
+
+## Deploying updates
+
+`deploy.sh` rsyncs the source code (not `comics/`/`arts/`, which are gitignored user content living only on the server) to the production host and optionally restarts the service:
+
+```bash
+# fill in REMOTE_HOST / REMOTE_PATH / RESTART_CMD at the top of the file first
+./deploy.sh
+```

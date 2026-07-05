@@ -1,6 +1,0 @@
-1) Fullscreen button disappears on lang switch
-2) Fullscreen button should be centered
-3) In fullscreen mode arrows exit the mode instead of navigating to the next page
-4) Remember reading progress using local storage - visualize it
-5) English font is bold and fitting, but the Russian one seems to not apply Bold style at all
-6) Script to deploy source code update using rsync

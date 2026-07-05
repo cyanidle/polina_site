@@ -35,8 +35,13 @@ a { color: inherit; }
 .hidden { display: none !important; }
 
 /* ── type scale ─────────────────────────────────────────────── */
+/* font-weight is set explicitly (not just inherited) because "Archivo Black"
+   has no Cyrillic glyphs — Cyrillic text silently falls back to "Archivo",
+   and without an explicit weight here it would render at the browser
+   default instead of matching the intended bold/black look. */
 h1, h2, h3, .display {
   font-family: "Archivo Black", "Archivo", sans-serif;
+  font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.01em;
   line-height: 1.02;
@@ -52,6 +57,8 @@ h1, h2, h3, .display {
   border: 3px solid var(--clr-ink);
   color: var(--clr-ink);
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
+  font-weight: 900;
   font-size: 0.78rem;
   padding: 6px 10px;
   cursor: pointer;
@@ -81,6 +88,8 @@ h1, h2, h3, .display {
   background: var(--clr-bg);
   color: var(--clr-ink);
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
+  font-weight: 900;
   font-size: 1rem;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -245,6 +254,7 @@ h1, h2, h3, .display {
 
 .back-link {
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 0.85rem;
   text-transform: uppercase;
   background: none;
@@ -322,10 +332,22 @@ h1, h2, h3, .display {
 
 .card-title {
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 0.95rem;
   padding: 12px 14px;
   text-transform: uppercase;
   line-height: 1.2;
+}
+
+/* reading-progress indicator, shown when localStorage has saved a position */
+.card-progress {
+  height: 5px;
+  width: 100%;
+  background: #eee;
+}
+.card-progress-fill {
+  height: 100%;
+  background: var(--clr-red);
 }
 
 .placeholder {
@@ -387,6 +409,7 @@ h1, h2, h3, .display {
   height: 40px;
   cursor: pointer;
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 1rem;
 }
 .carousel-nav:hover { background: var(--clr-yellow); }
@@ -429,11 +452,29 @@ h1, h2, h3, .display {
 }
 
 .comic-actions {
-  margin-bottom: 28px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.progress-bar {
+  height: 10px;
+  width: 100%;
+  max-width: 320px;
+  background: #eee;
+  border: 2px solid var(--clr-ink);
+  margin-bottom: 20px;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--clr-red);
 }
 
 .chapters-label, .characters-label {
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 0.9rem;
   text-transform: uppercase;
   margin-bottom: 10px;
@@ -478,6 +519,7 @@ h1, h2, h3, .display {
 
 .character-name {
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 0.85rem;
   text-transform: uppercase;
   margin-bottom: 4px;
@@ -503,10 +545,16 @@ h1, h2, h3, .display {
 
 .reader-header {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  flex-direction: column;
+  gap: 8px;
   padding: 14px 20px;
   border-bottom: 3px solid var(--clr-ink);
+}
+
+.reader-header-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 .reader-titles {
@@ -516,6 +564,7 @@ h1, h2, h3, .display {
 
 .reader-comic-title {
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 1rem;
   text-transform: uppercase;
   white-space: nowrap;
@@ -530,41 +579,46 @@ h1, h2, h3, .display {
 }
 
 .fullscreen-btn {
-  flex-shrink: 0;
+  align-self: center;
   font-size: 0.75rem;
   padding: 8px 12px;
   border: 2px solid var(--clr-ink);
 }
 
-/* Fullscreen mode: let the image use the full black-letterboxed area. */
-.reader:fullscreen,
-.reader:-webkit-full-screen {
+/* Fullscreen mode targets #app (not .reader/.art-detail directly) — those
+   views get fully torn down and rebuilt on every page turn or language
+   switch (full innerHTML re-render), and a browser auto-exits fullscreen
+   the instant its fullscreen element is removed from the document. #app
+   itself is never replaced, only its contents, so fullscreen survives
+   navigation within the reader. */
+#app:fullscreen,
+#app:-webkit-full-screen {
   background: #000;
 }
-.reader:fullscreen .reader-viewport img,
-.reader:-webkit-full-screen .reader-viewport img {
+#app:fullscreen .reader-viewport img,
+#app:-webkit-full-screen .reader-viewport img {
   max-height: 88vh;
 }
-.reader:fullscreen .reader-header,
-.reader:-webkit-full-screen .reader-header,
-.reader:fullscreen .reader-footer,
-.reader:-webkit-full-screen .reader-footer {
+#app:fullscreen .reader-header,
+#app:-webkit-full-screen .reader-header,
+#app:fullscreen .reader-footer,
+#app:-webkit-full-screen .reader-footer {
   background: #000;
   color: #fff;
   border-color: #444;
 }
-.reader:fullscreen .reader-comic-title,
-.reader:-webkit-full-screen .reader-comic-title,
-.reader:fullscreen .back-link,
-.reader:-webkit-full-screen .back-link,
-.reader:fullscreen .fullscreen-btn,
-.reader:-webkit-full-screen .fullscreen-btn {
+#app:fullscreen .reader-comic-title,
+#app:-webkit-full-screen .reader-comic-title,
+#app:fullscreen .back-link,
+#app:-webkit-full-screen .back-link,
+#app:fullscreen .fullscreen-btn,
+#app:-webkit-full-screen .fullscreen-btn {
   color: #fff;
   border-color: #fff;
 }
 
-img:fullscreen,
-img:-webkit-full-screen {
+#app:fullscreen .art-detail img,
+#app:-webkit-full-screen .art-detail img {
   max-width: 100vw;
   max-height: 100vh;
   object-fit: contain;
@@ -596,6 +650,7 @@ img:-webkit-full-screen {
   height: 84px;
   border: 3px solid var(--clr-ink);
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 1.3rem;
   cursor: pointer;
 }
@@ -616,6 +671,7 @@ img:-webkit-full-screen {
   justify-content: center;
   gap: 8px;
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 0.95rem;
   margin-bottom: 14px;
 }
@@ -626,6 +682,7 @@ img:-webkit-full-screen {
   border: 2px solid var(--clr-ink);
   text-align: center;
   font-family: "Archivo Black", sans-serif;
+  font-weight: 900;
   font-size: 0.95rem;
   -moz-appearance: textfield;
 }

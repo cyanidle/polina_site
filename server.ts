@@ -8,6 +8,8 @@
  * Layout:
  *   comics/<lang>/<comic>/<page files>            single-chapter comic
  *   comics/<lang>/<comic>/<chapter>/<page files>   multi-chapter comic
+ *   comics/<lang>/<comic>/teaser/<image files>     carousel images (not chapter pages —
+ *                                                  e.g. textless art), shown in file order
  *   comics/<lang>/<comic>/meta.json                optional metadata (see below)
  *   arts/<file>                                    a piece of art
  *   arts/<file>.txt                                optional description sidecar
@@ -17,7 +19,6 @@
  *     "title": "...",
  *     "description": "...",
  *     "cover": "0. Обложка.png",
- *     "teaser": ["1стр.png", "10стр.png"],
  *     "characters": [{ "name": "...", "about": "..." }],
  *     "pages": { "3стр.png": { "comment": "...", "date": "2026-01-15" } }
  *   }
@@ -42,6 +43,10 @@ const ARTS_DIR = `${ROOT}arts`;
 const STATIC_DIR = `${ROOT}static`;
 
 const LANGS = ["ru", "en"];
+
+// Reserved subdirectory name for carousel images — excluded from chapter
+// discovery so it never gets treated as a chapter itself.
+const TEASER_DIRNAME = "teaser";
 
 const IMAGE_EXTS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
@@ -81,7 +86,6 @@ type Meta = {
   title?: Localized;
   description?: Localized;
   cover?: string;
-  teaser?: string[];
   characters?: Character[];
   pages?: Record<string, PageMeta>;
 };
@@ -189,7 +193,9 @@ function basenameOf(relPath: string): string {
 async function scanComic(lang: string, name: string): Promise<ComicDetail | null> {
   const dir = `${COMICS_DIR}/${lang}/${name}`;
   const entries = await readDirSafe(dir);
-  const subdirs = entries.filter((e) => e.isDirectory).sort((a, b) => naturalCompare(a.name, b.name));
+  const subdirs = entries
+    .filter((e) => e.isDirectory && e.name !== TEASER_DIRNAME)
+    .sort((a, b) => naturalCompare(a.name, b.name));
 
   const chapters: Chapter[] = [];
   if (subdirs.length > 0) {
@@ -230,9 +236,9 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
   const findByBasename = (bare: string) => allPages.find((p) => basenameOf(p.file) === bare);
 
   const coverPage = (meta.cover && findByBasename(meta.cover)) || allPages[0];
-  const teaserPages = (meta.teaser ?? [])
-    .map((f) => findByBasename(f))
-    .filter((p): p is Page => !!p);
+
+  const teaserFiles = await readImageFiles(`${dir}/${TEASER_DIRNAME}`);
+  const teaser = teaserFiles.map((f) => urlFor("comics", lang, name, TEASER_DIRNAME, f));
 
   return {
     lang,
@@ -240,7 +246,7 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
     title: meta.title || name,
     description: meta.description || "",
     cover: coverPage.url,
-    teaser: teaserPages.map((p) => p.url),
+    teaser,
     characters: meta.characters ?? [],
     chapters,
   };

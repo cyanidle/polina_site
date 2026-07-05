@@ -31,6 +31,7 @@ const STRINGS = {
   published: { ru: "Опубликовано", en: "Published", },
   fullscreen: { ru: "На весь экран", en: "Fullscreen", },
   exitFullscreen: { ru: "Свернуть", en: "Exit fullscreen", },
+  continueReading: { ru: "Продолжить чтение", en: "Continue reading", },
 };
 
 let siteLang = localStorage.getItem("siteLang") || "ru";
@@ -79,6 +80,34 @@ function encPath(...segments) {
   return segments.map(encodeURIComponent).join("/");
 }
 
+// ── reading progress (localStorage) ───────────────────────────
+
+function progressKey(lang, name) {
+  return `${lang}/${name}`;
+}
+
+function loadAllProgress() {
+  try {
+    return JSON.parse(localStorage.getItem("readingProgress") || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function getProgress(lang, name) {
+  return loadAllProgress()[progressKey(lang, name)] ?? null;
+}
+
+function saveProgress(lang, name, chapterIdx, pageIdx, comic) {
+  const totalPages = comic.chapters.reduce((n, c) => n + c.pages.length, 0);
+  const pagesBefore = comic.chapters.slice(0, chapterIdx).reduce((n, c) => n + c.pages.length, 0);
+  const fraction = totalPages > 0 ? (pagesBefore + pageIdx + 1) / totalPages : 0;
+
+  const all = loadAllProgress();
+  all[progressKey(lang, name)] = { chapterIdx, pageIdx, fraction, updatedAt: Date.now() };
+  localStorage.setItem("readingProgress", JSON.stringify(all));
+}
+
 // ── fullscreen ───────────────────────────────────────────────
 
 function fullscreenSupported() {
@@ -99,7 +128,17 @@ function toggleFullscreen(el) {
 
 // Wires a button to toggle fullscreen on `el`. Hides the button entirely
 // on browsers without Fullscreen API support (notably iOS Safari).
+//
+// Re-rendering a view (page turn, language switch) doesn't always go
+// through `hashchange` — setSiteLang() calls render() directly — so we
+// can't rely on that event alone to clean up. Instead each call tears
+// down the previous call's listeners itself, keeping at most one set alive.
+let _fsCleanup = null;
+
 function setupFullscreenButton(btn, el) {
+  _fsCleanup?.();
+  _fsCleanup = null;
+
   if (!btn || !fullscreenSupported()) { btn?.classList.add("hidden"); return; }
 
   const update = () => {
@@ -108,13 +147,16 @@ function setupFullscreenButton(btn, el) {
   };
   update();
 
-  btn.addEventListener("click", () => toggleFullscreen(el));
+  const onClick = () => toggleFullscreen(el);
+  btn.addEventListener("click", onClick);
   document.addEventListener("fullscreenchange", update);
   document.addEventListener("webkitfullscreenchange", update);
-  window.addEventListener("hashchange", () => {
+
+  _fsCleanup = () => {
+    btn.removeEventListener("click", onClick);
     document.removeEventListener("fullscreenchange", update);
     document.removeEventListener("webkitfullscreenchange", update);
-  }, { once: true });
+  };
 }
 
 // ── router ───────────────────────────────────────────────────
@@ -227,12 +269,16 @@ async function renderComicsGrid(lang) {
     return;
   }
 
-  $grid.innerHTML = comics.map((c) => `
+  $grid.innerHTML = comics.map((c) => {
+    const progress = getProgress(lang, c.name);
+    return `
     <button class="card" data-nav="/comics/${encPath(lang, c.name)}">
       <div class="card-accent"></div>
       <img class="card-cover" src="${escapeHTML(c.cover)}" alt="${escapeHTML(c.title)}" loading="lazy">
       <div class="card-title">${escapeHTML(c.title)}</div>
-    </button>`).join("");
+      ${progress ? `<div class="card-progress"><div class="card-progress-fill" style="width:${Math.round(progress.fraction * 100)}%"></div></div>` : ""}
+    </button>`;
+  }).join("");
   bindNav();
 }
 
@@ -243,6 +289,7 @@ async function renderComicDetail(lang, name) {
   document.title = `${comic.title} — Hardgrizz Comics`;
 
   const carouselImages = [comic.cover, ...comic.teaser.filter((u) => u !== comic.cover)];
+  const progress = getProgress(lang, name);
 
   $app.innerHTML = `
     <div class="view comic-detail">
@@ -268,8 +315,13 @@ async function renderComicDetail(lang, name) {
             <h1 class="comic-title">${escapeHTML(comic.title)}</h1>
             ${comic.description ? `<p class="comic-description">${escapeHTML(comic.description)}</p>` : ""}
 
+            ${progress ? `
+              <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(progress.fraction * 100)}%"></div></div>
+            ` : ""}
+
             <div class="comic-actions">
               <button class="btn btn-red" id="read-from-start">${escapeHTML(t("readFromStart"))}</button>
+              ${progress ? `<button class="btn btn-yellow" id="continue-reading">${escapeHTML(t("continueReading"))} — ${Math.round(progress.fraction * 100)}%</button>` : ""}
             </div>
 
             ${comic.chapters.length > 1 ? `
@@ -312,9 +364,29 @@ async function renderComicDetail(lang, name) {
     d.addEventListener("click", () => showCarousel(Number(d.dataset.dot)));
   });
 
-  // read from start / chapter selection
+  if (carouselImages.length > 1) {
+    let carouselTouchX = 0, carouselTouchY = 0;
+    const $carousel = document.getElementById("carousel");
+    $carousel.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) return;
+      carouselTouchX = e.touches[0].clientX;
+      carouselTouchY = e.touches[0].clientY;
+    }, { passive: true });
+    $carousel.addEventListener("touchend", (e) => {
+      if (e.changedTouches.length !== 1) return;
+      const dx = e.changedTouches[0].clientX - carouselTouchX;
+      const dy = e.changedTouches[0].clientY - carouselTouchY;
+      if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+      if (dx < 0) showCarousel(carouselIndex + 1); else showCarousel(carouselIndex - 1);
+    }, { passive: true });
+  }
+
+  // read from start / continue / chapter selection
   document.getElementById("read-from-start").addEventListener("click", () => {
     navigate(`/comics/${encPath(lang, name)}/read/0/0`);
+  });
+  document.getElementById("continue-reading")?.addEventListener("click", () => {
+    navigate(`/comics/${encPath(lang, name)}/read/${progress.chapterIdx}/${progress.pageIdx}`);
   });
   document.querySelectorAll("[data-chapter]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -345,10 +417,12 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
   $app.innerHTML = `
     <div class="view reader">
       <div class="reader-header">
-        <button class="back-link" data-nav="/comics/${encPath(lang, name)}">← ${escapeHTML(t("backToComic"))}</button>
-        <div class="reader-titles">
-          <div class="reader-comic-title">${escapeHTML(comic.title)}</div>
-          ${comic.chapters.length > 1 ? `<div class="reader-chapter-title">${escapeHTML(chapter.name)}</div>` : ""}
+        <div class="reader-header-top">
+          <button class="back-link" data-nav="/comics/${encPath(lang, name)}">← ${escapeHTML(t("backToComic"))}</button>
+          <div class="reader-titles">
+            <div class="reader-comic-title">${escapeHTML(comic.title)}</div>
+            ${comic.chapters.length > 1 ? `<div class="reader-chapter-title">${escapeHTML(chapter.name)}</div>` : ""}
+          </div>
         </div>
         <button class="btn-ghost fullscreen-btn" id="reader-fullscreen">${escapeHTML(t("fullscreen"))}</button>
       </div>
@@ -391,7 +465,8 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
 
   document.getElementById("reader-prev").addEventListener("click", goPrev);
   document.getElementById("reader-next").addEventListener("click", goNext);
-  setupFullscreenButton(document.getElementById("reader-fullscreen"), document.querySelector(".reader"));
+  setupFullscreenButton(document.getElementById("reader-fullscreen"), $app);
+  saveProgress(lang, name, chapterIdx, pageIdx, comic);
 
   const $input = document.getElementById("reader-page-input");
   function commitPageInput() {
@@ -409,7 +484,7 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
     if (e.target.tagName === "INPUT") return;
     if (e.key === "ArrowLeft") goPrev();
     if (e.key === "ArrowRight") goNext();
-    if (e.key === "f" || e.key === "F") toggleFullscreen(document.querySelector(".reader"));
+    if (e.key === "f" || e.key === "F") toggleFullscreen($app);
   }
   document.addEventListener("keydown", onKeydown);
 
@@ -491,7 +566,7 @@ async function renderArtDetail(file) {
       </div>
     </div>`;
   bindNav();
-  setupFullscreenButton(document.getElementById("art-fullscreen"), document.getElementById("art-image"));
+  setupFullscreenButton(document.getElementById("art-fullscreen"), $app);
 }
 
 // ── nav delegation ───────────────────────────────────────────
