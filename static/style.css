@@ -1,7 +1,7 @@
 /* ══════════════════════════════════════════════════════════════
    Hardgrizz Comics — theme
    White background, primary-color geometry (red/yellow/blue),
-   bold black angular type (Archivo / Archivo Black).
+   bold black angular type (Archivo).
    ══════════════════════════════════════════════════════════════ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,12 +35,8 @@ a { color: inherit; }
 .hidden { display: none !important; }
 
 /* ── type scale ─────────────────────────────────────────────── */
-/* font-weight is set explicitly (not just inherited) because "Archivo Black"
-   has no Cyrillic glyphs — Cyrillic text silently falls back to "Archivo",
-   and without an explicit weight here it would render at the browser
-   default instead of matching the intended bold/black look. */
 h1, h2, h3, .display {
-  font-family: "Archivo Black", "Archivo", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.01em;
@@ -56,7 +52,7 @@ h1, h2, h3, .display {
   background: var(--clr-bg);
   border: 3px solid var(--clr-ink);
   color: var(--clr-ink);
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-weight: 900;
   font-size: 0.78rem;
@@ -87,7 +83,7 @@ h1, h2, h3, .display {
   border: 3px solid var(--clr-ink);
   background: var(--clr-bg);
   color: var(--clr-ink);
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-weight: 900;
   font-size: 1rem;
@@ -124,7 +120,6 @@ h1, h2, h3, .display {
   pointer-events: none;
 }
 .shape-circle  { border-radius: 50%; }
-.shape-square  { }
 .shape-triangle {
   width: 0; height: 0;
   background: none !important;
@@ -253,7 +248,7 @@ h1, h2, h3, .display {
 }
 
 .back-link {
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 0.85rem;
   text-transform: uppercase;
@@ -313,7 +308,7 @@ h1, h2, h3, .display {
 }
 
 .card-title {
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 0.95rem;
   padding: 12px 14px;
@@ -390,7 +385,7 @@ h1, h2, h3, .display {
   width: 40px;
   height: 40px;
   cursor: pointer;
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 1rem;
 }
@@ -455,7 +450,7 @@ h1, h2, h3, .display {
 }
 
 .chapters-label, .characters-label {
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 0.9rem;
   text-transform: uppercase;
@@ -500,7 +495,7 @@ h1, h2, h3, .display {
 }
 
 .character-name {
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 0.85rem;
   text-transform: uppercase;
@@ -545,7 +540,7 @@ h1, h2, h3, .display {
 }
 
 .reader-comic-title {
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 1rem;
   text-transform: uppercase;
@@ -640,7 +635,7 @@ h1, h2, h3, .display {
   width: 52px;
   height: 84px;
   border: 3px solid var(--clr-ink);
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 1.3rem;
   cursor: pointer;
@@ -661,7 +656,7 @@ h1, h2, h3, .display {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 0.95rem;
   margin-bottom: 14px;
@@ -672,10 +667,11 @@ h1, h2, h3, .display {
   padding: 6px;
   border: 2px solid var(--clr-ink);
   text-align: center;
-  font-family: "Archivo Black", sans-serif;
+  font-family: "Archivo", sans-serif;
   font-weight: 900;
   font-size: 0.95rem;
   -moz-appearance: textfield;
+  appearance: textfield;
 }
 #reader-page-input::-webkit-outer-spin-button,
 #reader-page-input::-webkit-inner-spin-button {
