@@ -71,7 +71,8 @@ static/          frontend: index.html (SPA shell), app.js (hash router + views),
 server.ts        Deno server: static files, /api/comics, /api/arts, image serving
 comics/          your comics (gitignored)
 arts/            your art (gitignored)
-nginx.conf       optional production reverse-proxy config
+nginx.conf       optional production reverse-proxy config (nginx)
+apache.conf      optional production reverse-proxy config (Apache, equivalent)
 deno.json        deno task "dev"; also enables editor Deno support
 ```
 
@@ -84,15 +85,27 @@ API (served from an in-memory cache kept fresh by `Deno.watchFs`):
 
 Both comics endpoints accept an optional `?uiLang=ru|en` query param to resolve any translated (`{"ru": "...", "en": "..."}`) text fields in `meta.json`; it defaults to `<lang>` if omitted.
 
-## Production (nginx)
+## Production (nginx or Apache)
 
-nginx serves `static/`, `comics/`, `arts/` directly and proxies only `/api/` to Deno on localhost:
+The reverse proxy serves `static/`, `comics/`, `arts/` directly (with 7-day immutable cache headers on images) and proxies only `/api/` to Deno on localhost. Two equivalent configs are provided — use whichever you run.
+
+**nginx:**
 
 ```bash
 sudo cp nginx.conf /etc/nginx/sites-available/comic
 sudo ln -s /etc/nginx/sites-available/comic /etc/nginx/sites-enabled/
 # edit server_name and the /path/to/polina_site paths in the config
 sudo nginx -t && sudo nginx -s reload
+deno run --allow-net --allow-read --allow-env server.ts   # stays on 127.0.0.1:8080
+```
+
+**Apache:**
+
+```bash
+sudo a2enmod proxy proxy_http headers expires alias   # once
+sudo cp apache.conf /etc/apache2/sites-available/comic.conf
+# edit ServerName and the /path/to/polina_site paths in the config
+sudo a2ensite comic && sudo apachectl configtest && sudo systemctl reload apache2
 deno run --allow-net --allow-read --allow-env server.ts   # stays on 127.0.0.1:8080
 ```
 
