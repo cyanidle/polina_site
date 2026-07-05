@@ -5,10 +5,10 @@ Hardgrizz-styled webcomic + art site. Deno backend, vanilla JS SPA frontend, no 
 ## Run
 
 ```bash
-deno run --allow-net --allow-read server.ts              # dev: http://127.0.0.1:8080
+deno run --allow-net --allow-read --allow-env server.ts              # dev: http://127.0.0.1:8080
 deno task dev                                              # same, via deno.json
-deno run --allow-net --allow-read server.ts 0.0.0.0 9090  # custom host/port (positional args)
-COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read server.ts  # custom content dirs (env vars)
+deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090  # custom host/port (positional args)
+COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --allow-env server.ts  # custom content dirs (env vars)
 ```
 
 No test suite or linter config. Verify changes by running the server and hitting `curl http://127.0.0.1:8080/api/health`, and by driving the actual pages in a browser — this is a UI-heavy app; typechecking (`deno check server.ts`) does not catch broken frontend flows.
@@ -19,7 +19,7 @@ No test suite or linter config. Verify changes by running the server and hitting
 - `static/index.html` — thin SPA shell: one `#app` mount point, Google Fonts link (Archivo / Archivo Black), a fixed RU/EN language toggle.
 - `static/app.js` — hash-based router (`#/`, `#/comics`, `#/comics/<lang>`, `#/comics/<lang>/<name>`, `#/comics/<lang>/<name>/read/<chapterIdx>/<pageIdx>`, `#/arts`, `#/arts/<file>`) plus all view-rendering functions. Bilingual UI strings live in the `STRINGS` object; `siteLang` persists in `localStorage`.
 - `static/style.css` — Hardgrizz theme: white background, sharp corners (`--radius: 0`), red/yellow/blue CSS variables, `Archivo Black` for headings/buttons, `Archivo` for body text, hard drop-shadow buttons/cards (`box-shadow: 5px 5px 0 var(--clr-ink)`).
-- Content directory locations are configurable via `COMICS_DIR`/`ARTS_DIR` env vars (`resolveDir()`/`readEnv()` in `server.ts`) — absolute path, or relative to `Deno.cwd()`; default to `comics`/`arts` under the repo root. `readEnv()` swallows the `PermissionDenied` thrown by `Deno.env.get()` without `--allow-env`, so the override is silently skipped (falls back to the default) rather than crashing the server — `--allow-env` is only needed if you actually want to use these vars, never required just to run the server.
+- Content directory locations are configurable via `COMICS_DIR`/`ARTS_DIR` env vars (`resolveDir()` in `server.ts`) — absolute path, or relative to `Deno.cwd()`; default to `comics`/`arts` under the repo root. `--allow-env` is always required to run the server, even if you don't set these vars — `Deno.env.get()` throws `NotCapable` without it regardless of whether the variable exists.
 - `comics/<lang>/<name>/` — content, **gitignored**. `<lang>` is `ru` or `en`. If the comic folder has subdirectories (other than `teaser/`, see below), each subdirectory is a chapter; otherwise it's a single flat chapter. Optional `meta.json` per comic (title, description, cover, characters, per-page comments/dates) — see `UPLOADING.md` for the schema. Text fields (`title`, `description`, `character.about`, `page.comment`) may be a plain string or a `{ "ru": "...", "en": "..." }` object (`Localized` type in `server.ts`); the API resolves it per-request from the `uiLang` query param (`pickLocale`/`resolveComicDetail`/`resolveComicSummary`), falling back to the comic's own `<lang>`, then to whatever translation exists. The frontend passes `?uiLang=<siteLang>` on every comics fetch so switching the RU/EN toggle re-resolves text without needing separate `<lang>` folders per translation.
 - `comics/<lang>/<name>/teaser/` — optional carousel images for the comic detail page (e.g. textless art, not chapter pages). Reserved dirname (`TEASER_DIRNAME` in `server.ts`) excluded from chapter discovery; images shown in filename sort order via `naturalCompare`. No `meta.json` field for this anymore — it used to be `meta.teaser: string[]` pointing at chapter page filenames, replaced by this dedicated directory.
 - `arts/` — content, **gitignored**. Flat: one image per artwork, optional sidecar `<name>.txt` for its description.
