@@ -382,7 +382,7 @@ async function renderComicDetail(lang, name) {
 // the browser cache before the reader navigates to them. Turning the
 // page then just swaps <img src> to an already-cached URL.
 
-const PRELOAD_AHEAD = 5;   // how many upcoming pages to fetch in advance
+const PRELOAD_AHEAD = 3;   // how many upcoming pages to fetch in advance
 const PRELOAD_MAX = 10;    // cap on retained Image() refs (bounds memory)
 const _preloaded = new Map();   // url -> Image, insertion-ordered for eviction
 

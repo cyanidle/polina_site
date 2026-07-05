@@ -577,9 +577,18 @@ h1, h2, h3, .display {
 #app:-webkit-full-screen {
   background: #000;
 }
+/* Size the fullscreen page to the space actually left between the header
+   and footer (which vary in height with the fullscreen button / page
+   comment), not a fixed vh — 88vh overflowed and collided with both. The
+   flex viewport already resolves to the leftover height, so 100% of it
+   plus overflow:hidden keeps the page fully inside. */
+#app:fullscreen .reader-viewport,
+#app:-webkit-full-screen .reader-viewport {
+  overflow: hidden;
+}
 #app:fullscreen .reader-viewport img,
 #app:-webkit-full-screen .reader-viewport img {
-  max-height: 88vh;
+  max-height: 100%;
 }
 #app:fullscreen .reader-header,
 #app:-webkit-full-screen .reader-header,
