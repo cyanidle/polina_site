@@ -47,8 +47,10 @@ const STRINGS = {
   next: { ru: "Вперёд", en: "Next", },
   newComics: { ru: "Есть новые комиксы", en: "New comics", },
   newArts: { ru: "Есть новые работы", en: "New art", },
+  newCharacters: { ru: "Есть новые персонажи", en: "New characters", },
   newPages: { ru: "Есть новые страницы", en: "New pages", },
   newItem: { ru: "Новое", en: "New", },
+  relatedComics: { ru: "Появляется в комиксах", en: "Appears in comics", },
 };
 
 // Language lives in the URL query string (`?lang=ru|en`) so it is
@@ -221,24 +223,32 @@ function comicHasUnread(lang, name, totalPages) {
   return (p.fraction ?? 0) < 1;
 }
 
-function loadVisitedArts() {
+// Generic "already opened" tracking, keyed by a localStorage store name.
+// Used for arts (by file) and characters (by name) — anything not yet opened
+// is "new" and gets the badge.
+function loadVisited(store) {
   try {
-    return JSON.parse(localStorage.getItem("visitedArts") || "{}");
+    return JSON.parse(localStorage.getItem(store) || "{}");
   } catch {
     return {};
   }
 }
 
-function isArtVisited(file) {
-  return !!loadVisitedArts()[file];
+function isVisited(store, id) {
+  return !!loadVisited(store)[id];
 }
 
-function markArtVisited(file) {
-  const all = loadVisitedArts();
-  if (all[file]) return;
-  all[file] = Date.now();
-  localStorage.setItem("visitedArts", JSON.stringify(all));
+function markVisited(store, id) {
+  const all = loadVisited(store);
+  if (all[id]) return;
+  all[id] = Date.now();
+  localStorage.setItem(store, JSON.stringify(all));
 }
+
+const isArtVisited = (file) => isVisited("visitedArts", file);
+const markArtVisited = (file) => markVisited("visitedArts", file);
+const isCharacterVisited = (name) => isVisited("visitedCharacters", name);
+const markCharacterVisited = (name) => markVisited("visitedCharacters", name);
 
 // ── "new" badge (yellow pointy star with a black "!") ─────────
 
@@ -260,7 +270,7 @@ function newBadge(labelKey) {
   return `<span class="new-badge" role="img" aria-label="${escapeHTML(label)}" title="${escapeHTML(label)}">
     <svg viewBox="0 0 100 100" aria-hidden="true">
       <polygon points="${_burstPoints}" fill="var(--clr-yellow)" stroke="var(--clr-ink)" stroke-width="5" stroke-linejoin="round"></polygon>
-      <text x="50" y="53" text-anchor="middle" dominant-baseline="central" font-family="'Archivo Black', 'Archivo', sans-serif" font-weight="900" font-size="54" fill="var(--clr-ink)">!</text>
+      <text x="50" y="53" text-anchor="middle" dominant-baseline="central" font-family="'Baumans', 'Baumans', sans-serif" font-weight="900" font-size="54" fill="var(--clr-ink)">!</text>
     </svg>
   </span>`;
 }
@@ -386,21 +396,25 @@ async function renderLanding() {
     </div>`;
   bindNav();
 
-  // Flag whether any comic (in the current language) or any art is unread,
-  // and stamp a badge on the corresponding button. Best-effort: a failed
-  // fetch just leaves the landing page badge-free rather than erroring out.
+  // Flag whether any comic (in the current language), art, or character is
+  // unread/unopened, and stamp a badge on the corresponding button. Best-
+  // effort: a failed fetch just leaves the landing page badge-free.
   try {
-    const [comics, arts] = await Promise.all([
+    const [comics, arts, characters] = await Promise.all([
       fetchJSON(`/api/comics/${encodeURIComponent(siteLang)}?uiLang=${encodeURIComponent(siteLang)}`).catch(() => []),
       fetchJSON("/api/arts").catch(() => []),
+      fetchJSON("/api/characters").catch(() => []),
     ]);
     if (location.hash.replace(/^#\/?/, "") !== "") return; // navigated away meanwhile
     const anyComic = comics.some((c) => comicHasUnread(siteLang, c.name, c.pages));
     const anyArt = arts.some((a) => !isArtVisited(a.file));
+    const anyCharacter = characters.some((c) => !isCharacterVisited(c.name));
     const $comicsBtn = $app.querySelector('[data-nav="/comics"]');
     const $artsBtn = $app.querySelector('[data-nav="/arts"]');
+    const $charsBtn = $app.querySelector('[data-nav="/characters"]');
     if (anyComic && $comicsBtn) $comicsBtn.insertAdjacentHTML("beforeend", newBadge("newComics"));
     if (anyArt && $artsBtn) $artsBtn.insertAdjacentHTML("beforeend", newBadge("newArts"));
+    if (anyCharacter && $charsBtn) $charsBtn.insertAdjacentHTML("beforeend", newBadge("newCharacters"));
   } catch { /* leave landing badge-free on error */ }
 }
 
@@ -802,6 +816,7 @@ async function renderCharactersGrid() {
 
   $grid.innerHTML = chars.map((c) => `
     <button class="card" data-nav="/characters/${encodeURIComponent(c.name)}">
+      ${isCharacterVisited(c.name) ? "" : newBadge("newItem")}
       <div class="card-accent"></div>
       <img class="card-cover" src="${escapeHTML(c.cover)}" alt="${escapeHTML(c.name)}" loading="lazy">
       <div class="card-title">${escapeHTML(c.name)}</div>
@@ -812,11 +827,13 @@ async function renderCharactersGrid() {
 // ── characters: detail ───────────────────────────────────────
 
 async function renderCharacterDetail(name) {
-  const chars = await fetchJSON("/api/characters");
+  const chars = await fetchJSON(`/api/characters?uiLang=${encodeURIComponent(siteLang)}`);
   const character = chars.find((c) => c.name === name);
   if (!character) return navigate("/characters");
 
+  markCharacterVisited(name);
   document.title = `${character.name} — Hardgrizz Comics`;
+  const relatedComics = character.comics ?? [];
   $app.innerHTML = `
     <div class="view">
       <div class="container">
@@ -832,6 +849,15 @@ async function renderCharacterDetail(name) {
             </figure>
           `).join("")}
         </div>
+        ${relatedComics.length > 0 ? `
+          <div class="related-comics">
+            <span class="related-comics-label">${escapeHTML(t("relatedComics"))}</span>
+            <div class="related-comics-list">
+              ${relatedComics.map((rc) => `
+                <button class="btn btn-blue related-comic-btn" data-nav="/comics/${encPath(rc.lang, rc.name)}">${escapeHTML(rc.title)}</button>
+              `).join("")}
+            </div>
+          </div>` : ""}
       </div>
     </div>`;
   bindNav();

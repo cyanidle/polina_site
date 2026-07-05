@@ -178,6 +178,26 @@ function resolveComicDetail(c: ComicDetail, uiLang: string) {
   };
 }
 
+// Every comic (across all languages) whose meta.json references this
+// character by name (case-insensitive) — used to show "appears in" links on
+// the character's page. Titles are resolved for the requesting uiLang.
+function comicsForCharacter(charName: string, uiLang: string) {
+  const target = charName.toLowerCase();
+  const refs: { lang: string; name: string; title: string }[] = [];
+  for (const lang of LANGS) {
+    for (const comic of comicsByLang[lang] ?? []) {
+      if (comic.characters.some((ch) => ch.name.toLowerCase() === target)) {
+        refs.push({ lang: comic.lang, name: comic.name, title: pickLocale(comic.title, uiLang, comic.lang) });
+      }
+    }
+  }
+  return refs;
+}
+
+function resolveCharacter(c: CharacterEntry, uiLang: string) {
+  return { ...c, comics: comicsForCharacter(c.name, uiLang) };
+}
+
 // ── content cache ────────────────────────────────────────────────
 //
 // The filesystem is scanned once at startup, then kept up-to-date by
@@ -454,7 +474,8 @@ async function handle(req: Request): Promise<Response> {
   }
 
   if (path === "/api/characters") {
-    return json(characters);
+    const uiLang = url.searchParams.get("uiLang") || LANGS[0];
+    return json(characters.map((c) => resolveCharacter(c, uiLang)));
   }
 
   // /api/comics/<lang> -> summaries
