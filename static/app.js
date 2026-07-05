@@ -31,7 +31,25 @@ const STRINGS = {
   continueReading: { ru: "Продолжить чтение", en: "Continue reading", },
 };
 
-let siteLang = localStorage.getItem("siteLang") || "ru";
+// Language lives in the URL query string (`?lang=ru|en`) so it is
+// bookmarkable/shareable. It sits in location.search, *before* the hash,
+// so it survives hash-route changes and never collides with the SPA's
+// `#/...` paths. Precedence on load: URL param > localStorage > "ru".
+function urlLang() {
+  const l = new URLSearchParams(location.search).get("lang");
+  return l === "ru" || l === "en" ? l : null;
+}
+
+let siteLang = urlLang() || localStorage.getItem("siteLang") || "ru";
+
+// Reflect the current language into the URL without adding a history entry
+// or triggering navigation (replaceState leaves the hash untouched).
+function syncUrlLang() {
+  const url = new URL(location.href);
+  if (url.searchParams.get("lang") === siteLang) return;
+  url.searchParams.set("lang", siteLang);
+  history.replaceState(history.state, "", url);
+}
 
 function t(key) {
   return STRINGS[key][siteLang] ?? STRINGS[key].ru ?? key;
@@ -40,6 +58,7 @@ function t(key) {
 function setSiteLang(lang) {
   siteLang = lang;
   localStorage.setItem("siteLang", lang);
+  syncUrlLang();
   document.documentElement.lang = lang;
   renderLangToggle();
   render();
@@ -597,5 +616,7 @@ function bindNav() {
 // ── go ────────────────────────────────────────────────────────
 
 document.documentElement.lang = siteLang;
+localStorage.setItem("siteLang", siteLang);
+syncUrlLang();
 renderLangToggle();
 render();
