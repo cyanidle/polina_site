@@ -395,6 +395,41 @@ async function renderComicDetail(lang, name) {
   });
 }
 
+// ── page preloading ──────────────────────────────────────────
+//
+// Kick off off-DOM Image() fetches for upcoming pages so they land in
+// the browser cache before the reader navigates to them. Turning the
+// page then just swaps <img src> to an already-cached URL.
+
+const PRELOAD_AHEAD = 5;   // how many upcoming pages to fetch in advance
+const PRELOAD_MAX = 10;    // cap on retained Image() refs (bounds memory)
+const _preloaded = new Map();   // url -> Image, insertion-ordered for eviction
+
+function preloadUrl(url) {
+  if (!url || _preloaded.has(url)) return;
+  const img = new Image();
+  img.src = url;
+  _preloaded.set(url, img);
+  // Evict oldest once over the cap; the browser HTTP cache keeps the
+  // bytes around regardless, so dropping the reference is safe.
+  while (_preloaded.size > PRELOAD_MAX) {
+    _preloaded.delete(_preloaded.keys().next().value);
+  }
+}
+
+// Flatten all pages across chapters into reading order, then preload the
+// next few after the current position (plus the immediate previous one,
+// for back-navigation).
+function preloadAround(comic, chapterIdx, pageIdx) {
+  const flat = [];
+  comic.chapters.forEach((ch, ci) =>
+    ch.pages.forEach((p, pi) => flat.push({ ci, pi, url: p.url })));
+  const cur = flat.findIndex((e) => e.ci === chapterIdx && e.pi === pageIdx);
+  if (cur === -1) return;
+  for (let i = 1; i <= PRELOAD_AHEAD; i++) preloadUrl(flat[cur + i]?.url);
+  preloadUrl(flat[cur - 1]?.url);
+}
+
 // ── comics: reader ───────────────────────────────────────────
 
 async function renderReader(lang, name, chapterIdx, pageIdx) {
@@ -467,6 +502,7 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
   document.getElementById("reader-next").addEventListener("click", goNext);
   setupFullscreenButton(document.getElementById("reader-fullscreen"), $app);
   saveProgress(lang, name, chapterIdx, pageIdx, comic);
+  preloadAround(comic, chapterIdx, pageIdx);
 
   const $input = document.getElementById("reader-page-input");
   function commitPageInput() {
