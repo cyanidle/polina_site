@@ -39,11 +39,11 @@ COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --
 
 - **Landing** — welcome text, two buttons: "Комиксы" / "Арты".
 - **Арты** — grid of art with titles; click to open enlarged with description.
-- **Комиксы** → pick **Русский** / **English** → grid of comics (cover + title) in that language.
+- **Комиксы** — grid of comics (cover + title) for the currently selected language; opening it drops straight into the list (no language-picker step). The RU/EN corner toggle switches which language's collection is listed.
 - **Comic page** — carousel (cover + `teaser/` images), navigable by click/dots/swipe; title, description, chapter picker, "Читать с начала", character list.
 - **Reader** — one page at a time, arrow navigation (click/keyboard/swipe), page-jump field, fullscreen mode (button or <kbd>F</kbd>), author comment + publish date per page if set.
 
-The whole UI is bilingual (RU/EN) via a corner toggle; picking a language in the comics section also switches the UI language. Comic text (title, description, character bios, page comments) can be translated within a single `meta.json` instead of duplicating the comic under both `comics/ru/` and `comics/en/` — see `UPLOADING.md`.
+The whole UI is bilingual (RU/EN) via a corner toggle, which also selects which comic collection (`comics/ru/` vs `comics/en/`) the list shows. Comic text (title, description, character bios, page comments) can be translated within a single `meta.json` instead of duplicating the comic under both `comics/ru/` and `comics/en/` — see `UPLOADING.md`.
 
 Reading progress (chapter + page) is saved per comic in the browser's `localStorage` — the comic page shows a "Continue reading" button and progress bar, and the comics grid shows a thin progress bar under any comic you've started. This is per-browser, not synced anywhere.
 

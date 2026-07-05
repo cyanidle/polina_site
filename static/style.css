@@ -267,24 +267,6 @@ h1, h2, h3, .display {
 }
 .back-link:hover { color: var(--clr-red); }
 
-/* ── lang picker (русский / english) ──────────────────────────── */
-
-.lang-picker {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-  padding: 60px 24px;
-  flex-wrap: wrap;
-}
-
-.lang-picker .btn {
-  min-width: 220px;
-  font-size: 1.3rem;
-  padding: 30px 20px;
-}
-
 /* ══════════════════════════════════════════════════════════════
    Grid (comics list / arts list)
    ══════════════════════════════════════════════════════════════ */
@@ -753,7 +735,6 @@ h1, h2, h3, .display {
 
 /* ── mobile ────────────────────────────────────────────────── */
 @media (max-width: 600px) {
-  .lang-picker .btn { min-width: 0; width: 100%; }
   .reader-nav { width: 44px; height: 64px; }
   .reader-viewport img { max-height: 62vh; }
   .carousel-nav { width: 44px; height: 44px; }

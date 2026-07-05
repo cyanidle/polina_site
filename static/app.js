@@ -12,9 +12,6 @@ const STRINGS = {
   welcomeText: { ru: "Комиксы и рисунки.", en: "Comics and art.", },
   comics: { ru: "Комиксы", en: "Comics", },
   arts: { ru: "Арты", en: "Arts", },
-  pickLanguage: { ru: "Выберите язык", en: "Pick a language", },
-  russian: { ru: "Русский", en: "Russian", },
-  english: { ru: "English", en: "English", },
   readFromStart: { ru: "Читать с начала", en: "Read from the start", },
   chapters: { ru: "Главы", en: "Chapters", },
   characters: { ru: "Персонажи", en: "Characters", },
@@ -174,8 +171,11 @@ async function render() {
 
   try {
     if (route.length === 0) return renderLanding();
-    if (route[0] === "comics" && route.length === 1) return renderLangPicker();
-    if (route[0] === "comics" && route.length === 2) return await renderComicsGrid(route[1]);
+    // The comic list always reflects the current RU/EN switch (siteLang),
+    // not a lang embedded in the URL — opening comics drops straight into
+    // the list, no language-picker step. `#/comics/<lang>` (length 2) is a
+    // legacy URL shape kept working, but still shows the switch's language.
+    if (route[0] === "comics" && route.length <= 2) return await renderComicsGrid(siteLang);
     if (route[0] === "comics" && route.length === 3) return await renderComicDetail(route[1], route[2]);
     if (route[0] === "comics" && route[3] === "read") {
       return await renderReader(route[1], route[2], Number(route[4]), Number(route[5]));
@@ -222,25 +222,6 @@ function renderLanding() {
       </div>
     </div>`;
   bindNav();
-}
-
-// ── comics: language picker ──────────────────────────────────
-
-function renderLangPicker() {
-  document.title = `${t("comics")} — Hardgrizz Comics`;
-  $app.innerHTML = `
-    <div class="view lang-picker">
-      <button class="btn btn-red" data-lang-pick="ru">${escapeHTML(t("russian"))}</button>
-      <button class="btn btn-blue" data-lang-pick="en">${escapeHTML(t("english"))}</button>
-    </div>`;
-
-  $app.querySelectorAll("[data-lang-pick]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const lang = btn.dataset.langPick;
-      setSiteLang(lang);
-      navigate(`/comics/${lang}`);
-    });
-  });
 }
 
 // ── comics: grid ─────────────────────────────────────────────
@@ -295,7 +276,7 @@ async function renderComicDetail(lang, name) {
     <div class="view comic-detail">
       <div class="container">
         <div class="section-header">
-          <button class="back-link" data-nav="/comics/${encodeURIComponent(lang)}">← ${escapeHTML(t("backToComics"))}</button>
+          <button class="back-link" data-nav="/comics">← ${escapeHTML(t("backToComics"))}</button>
         </div>
 
         <div class="comic-top">
