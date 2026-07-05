@@ -46,7 +46,9 @@ const ROOT = Deno.cwd() + "/";
 function resolveDir(envVarName: string, defaultName: string): string {
   const configured = Deno.env.get(envVarName)?.replace(/\/+$/, "");
   if (!configured) return `${ROOT}${defaultName}`;
-  return configured.startsWith("/") ? configured : `${ROOT}${configured}`;
+  const resolved = configured.startsWith("/") ? configured : `${ROOT}${configured}`;
+  console.log(`[comic-server] ${envVarName}=${configured} -> ${resolved}`);
+  return resolved;
 }
 
 const COMICS_DIR = resolveDir("COMICS_DIR", "comics");
@@ -228,7 +230,12 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
     }
   }
 
-  if (chapters.length === 0) return null;
+  if (chapters.length === 0) {
+    if (entries.length > 0) {
+      console.log(`[comic-server] warning: '${name}' (${lang}) has files but no recognized image pages — check extensions (${dir})`);
+    }
+    return null;
+  }
 
   const meta = await readMeta(dir);
   const allPages = chapters.flatMap((c) => c.pages);
@@ -264,12 +271,20 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
 }
 
 async function scanComicsForLang(lang: string): Promise<ComicDetail[]> {
-  const entries = await readDirSafe(`${COMICS_DIR}/${lang}`);
+  const langDir = `${COMICS_DIR}/${lang}`;
+  const entries = await readDirSafe(langDir);
   const dirs = entries.filter((e) => e.isDirectory);
   const result: ComicDetail[] = [];
   for (const dir of dirs) {
     const comic = await scanComic(lang, dir.name);
-    if (comic) result.push(comic);
+    if (comic) {
+      const pageCount = comic.chapters.reduce((n, c) => n + c.pages.length, 0);
+      console.log(`[comic-server]   + '${comic.name}' (${lang}): ${comic.chapters.length} chapter(s), ${pageCount} page(s)`);
+      result.push(comic);
+    }
+  }
+  if (dirs.length === 0) {
+    console.log(`[comic-server] no comic folders found in ${langDir}`);
   }
   result.sort((a, b) => naturalCompare(nativeTitle(a), nativeTitle(b)));
   return result;
@@ -294,10 +309,12 @@ async function scanArts(): Promise<Art[]> {
 }
 
 async function scan(): Promise<void> {
+  console.log(`[comic-server] scanning ${COMICS_DIR} and ${ARTS_DIR}...`);
   const next: Record<string, ComicDetail[]> = {};
   for (const lang of LANGS) next[lang] = await scanComicsForLang(lang);
   comicsByLang = next;
   arts = await scanArts();
+  console.log(`[comic-server]   + ${arts.length} art file(s) in ${ARTS_DIR}`);
 }
 
 // ── filesystem watcher ─────────────────────────────────────────
@@ -347,7 +364,8 @@ async function serveFile(filePath: string): Promise<Response> {
         "Content-Length": String(data.length),
       },
     });
-  } catch {
+  } catch (err) {
+    console.log(`[comic-server] 404: ${filePath} (${(err as Error).message})`);
     return new Response("Not found", { status: 404 });
   }
 }
@@ -402,9 +420,14 @@ async function handle(req: Request): Promise<Response> {
     return json(resolveComicDetail(comic, uiLang));
   }
 
-  // Comic / art images
-  if (path.startsWith("/comics/") || path.startsWith("/arts/")) {
-    const filePath = `${ROOT}${path.replace(/^\//, "")}`;
+  // Comic / art images — served from the (possibly overridden) COMICS_DIR /
+  // ARTS_DIR, not literally "<ROOT>/comics" or "<ROOT>/arts".
+  if (path.startsWith("/comics/")) {
+    const filePath = `${COMICS_DIR}/${path.slice("/comics/".length)}`;
+    return await serveFile(filePath);
+  }
+  if (path.startsWith("/arts/")) {
+    const filePath = `${ARTS_DIR}/${path.slice("/arts/".length)}`;
     return await serveFile(filePath);
   }
 
