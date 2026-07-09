@@ -405,10 +405,10 @@ async function identifyDims(filePath: string): Promise<{ w: number; h: number } 
   return w > 0 && h > 0 ? { w, h } : null;
 }
 
-async function generateSmall(originalPath: string): Promise<void> {
+async function generateSmall(originalPath: string): Promise<boolean> {
   const dims = await identifyDims(originalPath);
-  if (!dims) return;
-  if (Math.max(dims.w, dims.h) <= resizeMaxDim) return; // already small enough
+  if (!dims) return false;
+  if (Math.max(dims.w, dims.h) <= resizeMaxDim) return false; // already small enough
   const outExt = derivativeExt(extOf(originalPath));
   const derivative = smallPath(originalPath);
   // ensure the small/ directory exists (one stat + conditional mkdir)
@@ -429,16 +429,32 @@ async function generateSmall(originalPath: string): Promise<void> {
       }
     } catch { /* ignore */ }
     console.log(`[comic-server] resized ${basenameOf(originalPath)} (${dims.w}×${dims.h} → ≤${resizeMaxDim}px, ${fmt} q${resizeQuality}${pct})`);
+    return true;
   } else if (r.stderr) {
     console.log(`[comic-server] resize failed: ${basenameOf(originalPath)} — ${r.stderr.trim()}`);
   }
+  return false;
 }
 
 // Bounded-concurrency queue so a big first scan doesn't fork dozens of
 // ImageMagick processes at once. Tasks run as slots free up.
 const Generating = new Set<string>();
 let _genActive = 0;
+let _resizedCount = 0;
 const _genWaiters: Array<() => void> = [];
+
+// Called after every task finishes; when the queue is fully drained, log a
+// summary and trigger a rescan so the in-memory cache picks up the new
+// derivatives (the watcher may have ignored the file events while generation
+// was still in progress).
+function _maybeDrain(): void {
+  if (Generating.size > 0 || _genActive > 0) return;
+  if (_resizedCount > 0) {
+    console.log(`[comic-server] image resize: all done (${_resizedCount} image(s) resized), rescanning…`);
+    _resizedCount = 0;
+    scan();
+  }
+}
 
 function enqueue(task: () => Promise<void>): void {
   const run = () => {
@@ -447,6 +463,7 @@ function enqueue(task: () => Promise<void>): void {
       .finally(() => {
         _genActive--;
         _genWaiters.shift()?.();
+        _maybeDrain();
       });
   };
   if (_genActive < resizeConcurrency) {
@@ -465,7 +482,8 @@ function scheduleResize(originalPath: string): void {
   Generating.add(originalPath);
   enqueue(async () => {
     try {
-      await generateSmall(originalPath);
+      const ok = await generateSmall(originalPath);
+      if (ok) _resizedCount++;
     } finally {
       Generating.delete(originalPath);
     }
