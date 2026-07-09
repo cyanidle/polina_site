@@ -15,25 +15,42 @@ mkdir -p "comics/ru/Мой комикс"
 cp page1.png page2.png "comics/ru/Мой комикс/"
 
 # 3. Run the server from the repo root
-deno run --allow-net --allow-read --allow-env server.ts
+deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts
 # or: deno task dev
 ```
 
-Open http://127.0.0.1:8080 — done.
+Open http://127.0.0.1:8080 — done. (`--allow-run=…` is only for the optional on-the-fly image resize below; drop it if you don't use that.)
 
 Custom host/port:
 
 ```bash
-deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090
+deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts 0.0.0.0 9090
 ```
 
 Custom content locations (e.g. content stored outside the repo):
 
 ```bash
-COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --allow-env server.ts
+COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts
 ```
 
 `COMICS_DIR`/`ARTS_DIR` accept absolute paths or paths relative to the working directory; they default to `comics`/`arts` under the repo root.
+
+### Automatic image resize (optional)
+
+Large images are downscaled on the fly into smaller "shadow" WebP copies in a sibling `small/` subdirectory (e.g. `page.png` → `small/page.webp`) and those are served instead of the originals — handy when source pages are huge phone-scans. It's on by default and needs [ImageMagick](https://imagemagick.org/) (`magick`/`convert`/`identify`) plus `--allow-run` and `--allow-write` (for the `small/` dir — the server creates it automatically). If either is missing it's skipped (logged once) and originals are served — the server keeps working. Config (env vars):
+
+| var | default | meaning |
+| --- | --- | --- |
+| `IMAGE_RESIZE_ENABLED` | `true` | `false` disables it entirely |
+| `IMAGE_RESIZE_MAX_DIM` | `1600` | max width/height of the derivative, in px (images already ≤ this are left alone) |
+| `IMAGE_RESIZE_QUALITY` | `82` | WebP/JPEG quality of the derivative (for lossless WebP: compression-effort) |
+| `IMAGE_RESIZE_FORMAT` | `webp` | output format: `webp` (smaller, re-encodes) or `keep` (same format as source) |
+| `IMAGE_RESIZE_CONCURRENCY` | `3` | parallel ImageMagick processes during generation (1–8) |
+| `IMAGE_RESIZE_FORCE` | `false` | set to `true` to delete every `small/` directory on startup so derivatives regenerate with current settings (one-shot) |
+
+Derivatives are generated in the background and cached; originals are never modified. **Derivatives are lossless WebP by default** (pixel-perfect quality, still smaller than PNG originals).
+
+Run `./scripts/ensure-small-dirs.sh` after adding new content to pre-create the `small/` directories — the server creates them on demand as well, but the script front-loads it for a fresh install. To regenerate all derivatives after changing resize settings, run `./scripts/purge-small-dirs.sh`, then restart with `IMAGE_RESIZE_FORCE=1`.
 
 ## Site structure
 
@@ -78,8 +95,8 @@ static/          frontend: index.html (SPA shell), app.js (hash router + views),
 server.ts        Deno server: static files, /api/comics, /api/arts, image serving
 comics/          your comics (gitignored)
 arts/            your art (gitignored)
-nginx.conf       optional production reverse-proxy config (nginx)
-apache.conf      optional production reverse-proxy config (Apache, equivalent)
+config/          optional production reverse-proxy + systemd configs
+scripts/         helper scripts (start.sh, resize dir mgmt, deploy)
 deno.json        deno task "dev"; also enables editor Deno support
 ```
 
@@ -100,32 +117,32 @@ The reverse proxy serves `static/`, `comics/`, `arts/` directly (with 7-day immu
 **nginx:**
 
 ```bash
-sudo cp nginx.conf /etc/nginx/sites-available/comic
+sudo cp config/nginx.conf /etc/nginx/sites-available/comic
 sudo ln -s /etc/nginx/sites-available/comic /etc/nginx/sites-enabled/
 # edit server_name and the /path/to/polina_site paths in the config
 sudo nginx -t && sudo nginx -s reload
-deno run --allow-net --allow-read --allow-env server.ts   # stays on 127.0.0.1:8080
+deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts   # stays on 127.0.0.1:8080
 ```
 
 **Apache:**
 
 ```bash
 sudo a2enmod proxy proxy_http headers expires alias   # once
-sudo cp apache.conf /etc/apache2/sites-available/comic.conf
+sudo cp config/apache.conf /etc/apache2/sites-available/comic.conf
 # edit ServerName and the /path/to/polina_site paths in the config
 sudo a2ensite comic && sudo apachectl configtest && sudo systemctl reload apache2
-deno run --allow-net --allow-read --allow-env server.ts   # stays on 127.0.0.1:8080
+deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts   # stays on 127.0.0.1:8080
 ```
 
 The frontend uses the same relative URLs either way, so nothing else changes.
 
 ## Running as a service
 
-`start.sh` launches the server (`deno run ...`); `comic-server.service` is a systemd unit that runs `start.sh`, so systemd manages a shell script rather than calling `deno` directly:
+`scripts/start.sh` launches the server (`deno run ...`); `config/comic-server.service` is a systemd unit that runs it, so systemd manages a shell script rather than calling `deno` directly:
 
 ```bash
-# edit WorkingDirectory / ExecStart in comic-server.service first
-sudo cp comic-server.service /etc/systemd/system/
+# edit WorkingDirectory / ExecStart in config/comic-server.service first
+sudo cp config/comic-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now comic-server
 journalctl -u comic-server -f   # logs
@@ -133,9 +150,9 @@ journalctl -u comic-server -f   # logs
 
 ## Deploying updates
 
-`deploy.sh` rsyncs the source code (not `comics/`/`arts/`, which are gitignored user content living only on the server) to the production host and optionally restarts the service:
+`scripts/deploy.sh` rsyncs the source code (not `comics/`/`arts/`, which are gitignored user content living only on the server) to the production host and optionally restarts the service:
 
 ```bash
 # fill in REMOTE_HOST / REMOTE_PATH / RESTART_CMD at the top of the file first
-./deploy.sh
+./scripts/deploy.sh
 ```

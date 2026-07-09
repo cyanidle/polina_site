@@ -1,3 +1,5 @@
+import { basename as pathBasename, dirname as pathDirname, extname as pathExtname, join } from "jsr:@std/path@1";
+
 /**
  * Webcomic server — auto-discovers comics and art from the filesystem.
  *
@@ -29,16 +31,31 @@
  * the comic's own <lang>, then to whichever translation exists).
  *
  * Architecture:
- *   - dev:  `deno run --allow-net --allow-read --allow-env server.ts`
+ *   - dev:  `deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts`
  *   - prod: run on 127.0.0.1:8080 behind nginx (see nginx.conf).
  *
  * Usage:
- *   deno run --allow-net --allow-read --allow-env server.ts                # 127.0.0.1:8080
- *   deno run --allow-net --allow-read --allow-env server.ts 0.0.0.0 9090   # custom host/port
+ *   deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts                # 127.0.0.1:8080
+ *   deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts 0.0.0.0 9090   # custom host/port
  *
  * Env vars (optional; --allow-env is required regardless of whether they're set):
  *   COMICS_DIR   where comics/ content lives — absolute, or relative to cwd (default "comics")
  *   ARTS_DIR     where arts/ content lives — absolute, or relative to cwd (default "arts")
+ *
+ *   IMAGE_RESIZE_ENABLED       "1"/"true" to downscale large images on the fly (default: true)
+ *   IMAGE_RESIZE_MAX_DIM       max width/height of the derivative, in px (default: 1600)
+ *   IMAGE_RESIZE_QUALITY       WebP/JPEG quality of the derivative (default: 82; lossless WebP uses it as compression-effort)
+ *   IMAGE_RESIZE_FORMAT        output format of the derivative: "webp" (smaller, default) or "keep" (same as source)
+ *   IMAGE_RESIZE_CONCURRENCY   parallel ImageMagick processes during generation (default: 3, clamped 1-8)
+ *   IMAGE_RESIZE_FORCE         "1"/"true" to purge every existing small/ dir on startup so they regenerate
+ *                              with current settings (one-shot — the flag is cleared after purge)
+ *
+ * Derivatives live in a small/ subdirectory next to the original, e.g.
+ * /comics/ru/Test/page.png -> /comics/ru/Test/small/page.webp.
+ *
+ * Image resize needs ImageMagick (magick/convert/identify) on PATH AND
+ * --allow-run=magick,convert,identify. If either is missing, resize is
+ * skipped (logged once) and originals are served — the server still works.
  */
 
 const ROOT = Deno.cwd() + "/";
@@ -66,6 +83,13 @@ const TEASER_DIRNAME = "teaser";
 // flat arts scan (isFile filter) skips it automatically.
 const CHARACTERS_DIRNAME = "characters";
 
+// Derivatives live in a `small/` subdirectory next to the original, e.g.
+// /comics/ru/Test/page.png -> /comics/ru/Test/small/page.webp.
+// Directories, so the isFile filter in readImageFiles / scanArts naturally
+// skips them; only scanComic's chapter-discovery loop needs an explicit
+// exclusion (same as teaser/).  The flat arts scan is also unaffected.
+const SMALL_DIRNAME = "small";
+
 const IMAGE_EXTS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
 ]);
@@ -90,6 +114,61 @@ const naturalCompare = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
 }).compare;
+
+// ── image-resize config ───────────────────────────────────────
+//
+// Large images are downscaled once into a "shadow" WebP copy living in a
+// small/ subdirectory next to the original: /path/to/page.png becomes
+// /path/to/small/page.webp. All optional; needs ImageMagick + `--allow-run`
+// (see the resize section below for details).
+function parseBool(v: string | undefined, def: boolean): boolean {
+  if (v == null) return def;
+  return /^(1|true|yes|on)$/i.test(v.trim());
+}
+
+const resizeEnabledCfg = parseBool(Deno.env.get("IMAGE_RESIZE_ENABLED"), true);
+const resizeMaxDim = parseInt(Deno.env.get("IMAGE_RESIZE_MAX_DIM") ?? "", 10) || 1600;
+const resizeQuality = parseInt(Deno.env.get("IMAGE_RESIZE_QUALITY") ?? "", 10) || 82;
+const resizeConcurrency = Math.min(8, Math.max(1, parseInt(Deno.env.get("IMAGE_RESIZE_CONCURRENCY") ?? "", 10) || 3));
+// Output format of the derivative: "webp" (re-encode for much smaller files,
+// default) or "keep" (same format as the source).
+const resizeFormat = (Deno.env.get("IMAGE_RESIZE_FORMAT") ?? "webp").toLowerCase() === "keep" ? "keep" : "webp";
+
+// Detected at startup in main(): "im7" (magick), "im6" (convert), or null.
+// `resizeActive` is true only when enabled AND ImageMagick was detected AND
+// --allow-run is granted.
+let imKind: "im7" | "im6" | null = null;
+let resizeActive = false;
+
+// One-shot: when IMAGE_RESIZE_FORCE is set, main() purges every existing
+// small/ directory before the first scan so they all regenerate with current
+// settings (e.g. after changing FORMAT/QUALITY/MAX_DIM), then clears this.
+let resizeForce = parseBool(Deno.env.get("IMAGE_RESIZE_FORCE"), false);
+
+// Extension the derivative is written as. webp -> always .webp; keep -> the
+// source's own extension.
+function derivativeExt(srcExt: string): string {
+  return resizeFormat === "webp" ? ".webp" : srcExt;
+}
+
+// Derivative filename: original stem + (possibly new) extension.
+//   "page.png" + webp -> "page.webp"; "page.png" + keep -> "page.png".
+function derivativeFilename(originalFile: string): string {
+  const ext = pathExtname(originalFile);
+  return pathBasename(originalFile, ext) + derivativeExt(ext);
+}
+
+// Absolute filesystem path of the derivative: small/ subdirectory next to
+// the original, with the (possibly format-converted) filename.
+function smallPath(originalPath: string): string {
+  return join(pathDirname(originalPath), SMALL_DIRNAME, derivativeFilename(pathBasename(originalPath)));
+}
+
+// URL for the derivative — same segments as the original, but with small/
+// inserted before the filename.
+function smallUrl(segments: string[], originalFile: string): string {
+  return urlFor(...segments, SMALL_DIRNAME, derivativeFilename(originalFile));
+}
 
 // ── types ────────────────────────────────────────────────────────
 
@@ -221,8 +300,7 @@ async function readDirSafe(dir: string): Promise<Deno.DirEntry[]> {
 }
 
 function isImage(filename: string): boolean {
-  const dot = filename.lastIndexOf(".");
-  return dot !== -1 && IMAGE_EXTS.has(filename.substring(dot).toLowerCase());
+  return IMAGE_EXTS.has(pathExtname(filename).toLowerCase());
 }
 
 async function readImageFiles(dir: string): Promise<string[]> {
@@ -246,30 +324,199 @@ function basenameOf(relPath: string): string {
   return slash === -1 ? relPath : relPath.substring(slash + 1);
 }
 
+// ── image resize (ImageMagick) ────────────────────────────────
+//
+// Large source images are downscaled once into a "shadow" derivative in a
+// sibling small/ subdirectory (e.g. page.png -> small/page.webp) and that
+// derivative is served instead of the original. Generation is async and
+// non-blocking: a scan schedules any missing/out-of-date derivatives, and
+// the next scan (the file write fires the watcher) serves them. Originals
+// are never modified; derivatives are plain cache files living in the same
+// (gitignored) content dirs, served by the existing /comics/ and /arts/ routes.
+
+let _runDenied = false;
+
+// Environment passed to ImageMagick: the inherited env minus library-injection
+// vars (LD_LIBRARY_PATH, DYLD_*, …). Deno refuses to leak those to a subprocess
+// unless --allow-all, so stripping them lets a scoped --allow-run work in
+// environments that set LD_* (snap packages, some containers). Built once.
+const _subEnv: Record<string, string> = Object.fromEntries(
+  Object.entries(Deno.env.toObject()).filter(([k]) => !/^(LD_|DYLD_)/.test(k)),
+) as Record<string, string>;
+
+async function runCmd(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+  if (_runDenied) return { code: -1, stdout: "", stderr: "subprocess execution denied" };
+  try {
+    const proc = new Deno.Command(args[0], {
+      args: args.slice(1),
+      stdout: "piped",
+      stderr: "piped",
+      clearEnv: true,
+      env: _subEnv,
+    });
+    const out = await proc.output();
+    const dec = new TextDecoder();
+    return { code: out.code, stdout: dec.decode(out.stdout), stderr: dec.decode(out.stderr) };
+  } catch (e) {
+    if (e instanceof Deno.errors.NotCapable) _runDenied = true;
+    return { code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+async function detectIm(): Promise<"im7" | "im6" | null> {
+  for (const [bin, kind] of [["magick", "im7"], ["convert", "im6"]] as const) {
+    const r = await runCmd([bin, "-version"]);
+    if (_runDenied) return null;
+    if (r.code === 0 || /ImageMagick/i.test(r.stdout)) return kind;
+  }
+  return null;
+}
+
+function identifyArgs(filePath: string): string[] {
+  return imKind === "im7"
+    ? ["magick", "identify", "-format", "%w %h", filePath]
+    : ["identify", "-format", "%w %h", filePath];
+}
+
+function resizeArgs(filePath: string, smallPath: string, outExt: string): string[] {
+  // `>` shrinks only if larger than the box, so already-small images are left
+  // untouched; -strip drops metadata for smaller files.
+  const opts = ["-resize", `${resizeMaxDim}x${resizeMaxDim}>`, "-strip"];
+  // -quality is only meaningful for lossy formats (for PNG it's the zlib
+  // level 0-9), so it applies to the *output* — webp/jpeg — not the source.
+  // Lossless webp uses -quality for compression-effort (0-100) rather than
+  // visual quality; the true lossless parameter is the -define.
+  if (outExt === ".webp") {
+    opts.push("-quality", String(resizeQuality), "-define", "webp:lossless=true");
+  } else if (outExt === ".jpg" || outExt === ".jpeg") {
+    opts.push("-quality", String(resizeQuality));
+  }
+  if (imKind === "im7") return ["magick", filePath, ...opts, smallPath];
+  return ["convert", filePath, ...opts, smallPath];
+}
+
+async function identifyDims(filePath: string): Promise<{ w: number; h: number } | null> {
+  const r = await runCmd(identifyArgs(filePath));
+  if (r.code !== 0) return null;
+  const m = r.stdout.trim().split(/\s+/);
+  const w = parseInt(m[0], 10);
+  const h = parseInt(m[1], 10);
+  return w > 0 && h > 0 ? { w, h } : null;
+}
+
+async function generateSmall(originalPath: string): Promise<void> {
+  const dims = await identifyDims(originalPath);
+  if (!dims) return;
+  if (Math.max(dims.w, dims.h) <= resizeMaxDim) return; // already small enough
+  const outExt = derivativeExt(extOf(originalPath));
+  const derivative = smallPath(originalPath);
+  // ensure the small/ directory exists (one stat + conditional mkdir)
+  const smallDir = pathDirname(derivative);
+  try { await Deno.stat(smallDir); } catch {
+    await Deno.mkdir(smallDir, { recursive: true });
+  }
+  let origSize = 0;
+  try { origSize = (await Deno.stat(originalPath)).size; } catch { /* ignore */ }
+  const r = await runCmd(resizeArgs(originalPath, derivative, outExt));
+  if (r.code === 0) {
+    const fmt = outExt.slice(1);
+    let pct = "";
+    try {
+      const smallSize = (await Deno.stat(derivative)).size;
+      if (origSize > 0) {
+        pct = ` -${Math.round((1 - smallSize / origSize) * 100)}%`;
+      }
+    } catch { /* ignore */ }
+    console.log(`[comic-server] resized ${basenameOf(originalPath)} (${dims.w}×${dims.h} → ≤${resizeMaxDim}px, ${fmt} q${resizeQuality}${pct})`);
+  } else if (r.stderr) {
+    console.log(`[comic-server] resize failed: ${basenameOf(originalPath)} — ${r.stderr.trim()}`);
+  }
+}
+
+// Bounded-concurrency queue so a big first scan doesn't fork dozens of
+// ImageMagick processes at once. Tasks run as slots free up.
+const _generating = new Set<string>();
+let _genActive = 0;
+const _genWaiters: Array<() => void> = [];
+
+function enqueue(task: () => Promise<void>): void {
+  const run = () => {
+    task()
+      .catch((e) => console.log(`[comic-server] ${e instanceof Error ? e.message : String(e)}`))
+      .finally(() => {
+        _genActive--;
+        _genWaiters.shift()?.();
+      });
+  };
+  if (_genActive < resizeConcurrency) {
+    _genActive++;
+    run();
+  } else {
+    _genWaiters.push(() => {
+      _genActive++;
+      run();
+    });
+  }
+}
+
+function scheduleResize(originalPath: string): void {
+  if (!resizeActive || _generating.has(originalPath)) return;
+  _generating.add(originalPath);
+  enqueue(async () => {
+    try {
+      await generateSmall(originalPath);
+    } finally {
+      _generating.delete(originalPath);
+    }
+  });
+}
+
+// URL to serve for an image: the derivative if a current one exists, else
+// the original (scheduling generation of the derivative in the background).
+// `segments` are the URL path parts up to (but not including) the filename.
+async function resolveImageUrl(dir: string, file: string, segments: string[]): Promise<string> {
+  const originalUrl = urlFor(...segments, file);
+  if (!resizeActive) return originalUrl;
+  const origPath = `${dir}/${file}`;
+  const derivPath = smallPath(origPath);
+  try {
+    const [s, o] = await Promise.all([Deno.stat(derivPath), Deno.stat(origPath)]);
+    // Derivative is current only if not older than its source.
+    if ((s.mtime?.getTime() ?? 0) >= (o.mtime?.getTime() ?? 0)) {
+      return smallUrl(segments, file);
+    }
+  } catch { /* derivative missing -> fall through and schedule it */ }
+  scheduleResize(origPath);
+  return originalUrl;
+}
+
 async function scanComic(lang: string, name: string): Promise<ComicDetail | null> {
   const dir = `${COMICS_DIR}/${lang}/${name}`;
   const entries = await readDirSafe(dir);
   const subdirs = entries
-    .filter((e) => e.isDirectory && e.name !== TEASER_DIRNAME)
+    .filter((e) => e.isDirectory && e.name !== TEASER_DIRNAME && e.name !== SMALL_DIRNAME)
     .sort((a, b) => naturalCompare(a.name, b.name));
 
   const chapters: Chapter[] = [];
   if (subdirs.length > 0) {
     for (const sub of subdirs) {
-      const files = await readImageFiles(`${dir}/${sub.name}`);
+      const subDir = `${dir}/${sub.name}`;
+      const files = await readImageFiles(subDir);
       if (files.length === 0) continue;
-      chapters.push({
-        name: sub.name,
-        pages: files.map((f) => ({ file: `${sub.name}/${f}`, url: urlFor("comics", lang, name, sub.name, f) })),
-      });
+      const pages: Page[] = [];
+      for (const f of files) {
+        pages.push({ file: `${sub.name}/${f}`, url: await resolveImageUrl(subDir, f, ["comics", lang, name, sub.name]) });
+      }
+      chapters.push({ name: sub.name, pages });
     }
   } else {
     const files = await readImageFiles(dir);
     if (files.length > 0) {
-      chapters.push({
-        name,
-        pages: files.map((f) => ({ file: f, url: urlFor("comics", lang, name, f) })),
-      });
+      const pages: Page[] = [];
+      for (const f of files) {
+        pages.push({ file: f, url: await resolveImageUrl(dir, f, ["comics", lang, name]) });
+      }
+      chapters.push({ name, pages });
     }
   }
 
@@ -298,8 +545,10 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
 
   const coverPage = (meta.cover && findByBasename(meta.cover)) || allPages[0];
 
-  const teaserFiles = await readImageFiles(`${dir}/${TEASER_DIRNAME}`);
-  const teaser = teaserFiles.map((f) => urlFor("comics", lang, name, TEASER_DIRNAME, f));
+  const teaserDir = `${dir}/${TEASER_DIRNAME}`;
+  const teaserFiles = await readImageFiles(teaserDir);
+  const teaser: string[] = [];
+  for (const f of teaserFiles) teaser.push(await resolveImageUrl(teaserDir, f, ["comics", lang, name, TEASER_DIRNAME]));
 
   return {
     lang,
@@ -346,7 +595,7 @@ async function scanArts(): Promise<Art[]> {
     try {
       description = (await Deno.readTextFile(`${ARTS_DIR}/${title}.txt`)).trim();
     } catch { /* no sidecar */ }
-    result.push({ file, title, description, url: urlFor("arts", file) });
+    result.push({ file, title, description, url: await resolveImageUrl(ARTS_DIR, file, ["arts"]) });
   }
   return result;
 }
@@ -375,11 +624,34 @@ async function scanCharacters(): Promise<CharacterEntry[]> {
       try {
         description = (await Deno.readTextFile(`${dir}/${bare}.txt`)).trim();
       } catch { /* no sidecar */ }
-      images.push({ file, description, url: urlFor("arts", CHARACTERS_DIRNAME, name, file) });
+      images.push({ file, description, url: await resolveImageUrl(dir, file, ["arts", CHARACTERS_DIRNAME, name]) });
     }
     result.push({ name, cover: images[0].url, images });
   }
   return result;
+}
+
+// Delete every small/ directory under `root` so derivatives get regenerated
+// with current settings. Used by the one-shot IMAGE_RESIZE_FORCE flag at
+// startup. Returns how many files were removed.
+async function purgeDerivatives(root: string): Promise<number> {
+  let n = 0;
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readDirSafe(dir);
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory && e.name === SMALL_DIRNAME) {
+        // Count files inside before removing the directory
+        const smallEntries = await readDirSafe(p);
+        n += smallEntries.filter((f) => f.isFile).length;
+        try { await Deno.remove(p, { recursive: true }); } catch { /* ignore */ }
+      } else if (e.isDirectory) {
+        await walk(p);
+      }
+    }
+  };
+  await walk(root);
+  return n;
 }
 
 async function scan(): Promise<void> {
@@ -422,8 +694,7 @@ function startWatcher(): Deno.FsWatcher[] {
 // ── file serving ───────────────────────────────────────────────
 
 function extOf(path: string): string {
-  const dot = path.lastIndexOf(".");
-  return dot === -1 ? "" : path.substring(dot).toLowerCase();
+  return pathExtname(path).toLowerCase();
 }
 
 function mimeType(path: string): string {
@@ -530,6 +801,31 @@ async function handle(req: Request): Promise<Response> {
 async function main() {
   const hostname = Deno.args[0] ?? "127.0.0.1";
   const port = parseInt(Deno.args[1] ?? "8080", 10);
+
+  // Detect ImageMagick for optional on-the-fly resize of large images.
+  imKind = await detectIm();
+  if (resizeEnabledCfg) {
+    if (_runDenied) {
+      console.log("[comic-server] image resize: --allow-run not granted; serving originals. Add --allow-run=magick,convert,identify or set IMAGE_RESIZE_ENABLED=false");
+    } else if (!imKind) {
+      console.log("[comic-server] image resize: ImageMagick not found; serving originals. Install IM or set IMAGE_RESIZE_ENABLED=false");
+    } else {
+      resizeActive = true;
+      console.log(`[comic-server] image resize: on (ImageMagick ${imKind}, max ${resizeMaxDim}px, ${resizeFormat === "webp" ? "webp" : "same-format"}, q${resizeQuality})`);
+    }
+  } else {
+    console.log("[comic-server] image resize: disabled (IMAGE_RESIZE_ENABLED=false)");
+  }
+
+  // One-shot purge of all existing derivatives so they regenerate with
+  // current settings (set IMAGE_RESIZE_FORCE=1 to trigger this).
+  if (resizeForce && resizeActive) {
+    await Promise.all([purgeDerivatives(COMICS_DIR), purgeDerivatives(ARTS_DIR)]);
+    // Count is omitted from the log (could be thousands) but the function
+    // returns it; a manual count is `find … -type d -name small | wc -l`.
+    console.log("[comic-server] image resize: purged old derivatives for regeneration");
+    resizeForce = false;
+  }
 
   // Initial scan
   await scan();
