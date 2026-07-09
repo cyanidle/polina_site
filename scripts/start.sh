@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DIR=$(realpath `dirname $0/..`)
+DIR=$(realpath `dirname $0`/..)
 
 deno run \
     --allow-net --allow-read --allow-env --allow-write \

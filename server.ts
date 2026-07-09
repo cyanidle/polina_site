@@ -435,7 +435,7 @@ async function generateSmall(originalPath: string): Promise<void> {
 
 // Bounded-concurrency queue so a big first scan doesn't fork dozens of
 // ImageMagick processes at once. Tasks run as slots free up.
-const _generating = new Set<string>();
+const Generating = new Set<string>();
 let _genActive = 0;
 const _genWaiters: Array<() => void> = [];
 
@@ -460,13 +460,13 @@ function enqueue(task: () => Promise<void>): void {
 }
 
 function scheduleResize(originalPath: string): void {
-  if (!resizeActive || _generating.has(originalPath)) return;
-  _generating.add(originalPath);
+  if (!resizeActive || Generating.has(originalPath)) return;
+  Generating.add(originalPath);
   enqueue(async () => {
     try {
       await generateSmall(originalPath);
     } finally {
-      _generating.delete(originalPath);
+      Generating.delete(originalPath);
     }
   });
 }
@@ -672,6 +672,8 @@ function startWatcher(): Deno.FsWatcher[] {
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const rescan = () => {
+    if (Generating.size)
+      return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(async () => {
       await scan();
