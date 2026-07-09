@@ -1,0 +1,20 @@
+services:
+  ddns:
+    container_name: ddns
+    image: oznu/cloudflare-ddns:latest
+    restart: always
+    environment:
+      - API_KEY=${CF_API_KEY}
+      - ZONE=hardgrizz.art
+      - PROXIED=false
+      - RRTYPE=A
+      - DELETE_ON_STOP=false
+      - DNS_SERVER=1.1.1.1
+
+  certbot:
+    image: certbot/dns-cloudflare
+    container_name: certbot
+    profiles: ["tools"]
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt
+      - ./cloudflare.ini:/cloudflare.ini:ro
