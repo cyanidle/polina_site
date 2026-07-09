@@ -45,7 +45,7 @@ Large images are downscaled on the fly into smaller "shadow" WebP copies in a si
 | `IMAGE_RESIZE_MAX_DIM` | `1600` | max width/height of the derivative, in px (images already ≤ this are left alone) |
 | `IMAGE_RESIZE_QUALITY` | `82` | WebP/JPEG quality of the derivative (for lossless WebP: compression-effort) |
 | `IMAGE_RESIZE_FORMAT` | `webp` | output format: `webp` (smaller, re-encodes) or `keep` (same format as source) |
-| `IMAGE_RESIZE_CONCURRENCY` | `3` | parallel ImageMagick processes during generation (1–8) |
+| `IMAGE_RESIZE_CONCURRENCY` | `cpu cores` | parallel ImageMagick processes during generation |
 | `IMAGE_RESIZE_FORCE` | `false` | set to `true` to delete every `small/` directory on startup so derivatives regenerate with current settings (one-shot) |
 
 Derivatives are generated in the background and cached; originals are never modified. **Derivatives are lossless WebP by default** (pixel-perfect quality, still smaller than PNG originals).

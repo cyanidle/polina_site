@@ -129,7 +129,8 @@ function parseBool(v: string | undefined, def: boolean): boolean {
 const resizeEnabledCfg = parseBool(Deno.env.get("IMAGE_RESIZE_ENABLED"), true);
 const resizeMaxDim = parseInt(Deno.env.get("IMAGE_RESIZE_MAX_DIM") ?? "", 10) || 1600;
 const resizeQuality = parseInt(Deno.env.get("IMAGE_RESIZE_QUALITY") ?? "", 10) || 82;
-const resizeConcurrency = Math.min(8, Math.max(1, parseInt(Deno.env.get("IMAGE_RESIZE_CONCURRENCY") ?? "", 10) || 3));
+const cores = navigator.hardwareConcurrency;
+const resizeConcurrency = Math.min(8, Math.max(1, parseInt(Deno.env.get("IMAGE_RESIZE_CONCURRENCY") ?? "", 10) || cores));
 // Output format of the derivative: "webp" (re-encode for much smaller files,
 // default) or "keep" (same format as the source).
 const resizeFormat = (Deno.env.get("IMAGE_RESIZE_FORMAT") ?? "webp").toLowerCase() === "keep" ? "keep" : "webp";
