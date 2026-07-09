@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 comics/
 arts/
+node_modules/
