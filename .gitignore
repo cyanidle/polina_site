@@ -6,3 +6,4 @@ arts/
 node_modules/
 compose/.env
 compose/cloudflare.ini
+vendor/

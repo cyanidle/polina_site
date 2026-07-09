@@ -1,5 +1,6 @@
 {
   "tasks": {
     "dev": "deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts"
-  }
+  },
+  "vendor": true
 }
