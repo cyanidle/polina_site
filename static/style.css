@@ -593,9 +593,9 @@ h1, h2, h3, .display {
 .reader-header {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 20px;
-  border-bottom: 3px solid var(--clr-ink);
+  gap: 4px;
+  padding: 10px 16px;
+  border-bottom: 2px solid var(--clr-ink);
 }
 
 .reader-header-top {
@@ -632,45 +632,58 @@ h1, h2, h3, .display {
   border: 2px solid var(--clr-ink);
 }
 
-/* Fullscreen mode targets #app (not .reader/.art-detail directly) — those
-   views get fully torn down and rebuilt on every page turn or language
-   switch (full innerHTML re-render), and a browser auto-exits fullscreen
-   the instant its fullscreen element is removed from the document. #app
-   itself is never replaced, only its contents, so fullscreen survives
-   navigation within the reader. */
+/* icon-style fullscreen button — positioned inside the viewport */
+.fullscreen-icon {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  width: 38px;
+  height: 38px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fullscreen-icon:hover { background: rgba(0, 0, 0, 0.7); }
+.fullscreen-icon.hidden { display: none; }
+
+/* Fullscreen mode — hide chrome, show only the image + exit icon.
+   Targets #app (not .reader directly) because the reader is torn down and
+   rebuilt on every page turn; #app is never replaced so fullscreen survives. */
 #app:fullscreen,
 #app:-webkit-full-screen {
   background: #000;
 }
-/* Size the fullscreen page to the space actually left between the header
-   and footer (which vary in height with the fullscreen button / page
-   comment), not a fixed vh — 88vh overflowed and collided with both. The
-   flex viewport already resolves to the leftover height, so 100% of it
-   plus overflow:hidden keeps the page fully inside. */
+#app:fullscreen .reader-header,
+#app:-webkit-full-screen .reader-header,
+#app:fullscreen .reader-footer,
+#app:-webkit-full-screen .reader-footer {
+  display: none;
+}
+#app:fullscreen .reader-nav,
+#app:-webkit-full-screen .reader-nav {
+  display: none;
+}
 #app:fullscreen .reader-viewport,
 #app:-webkit-full-screen .reader-viewport {
   overflow: hidden;
 }
 #app:fullscreen .reader-viewport img,
 #app:-webkit-full-screen .reader-viewport img {
-  max-height: 100%;
+  max-width: 100vw;
+  max-height: 100vh;
+  border: none;
 }
-#app:fullscreen .reader-header,
-#app:-webkit-full-screen .reader-header,
-#app:fullscreen .reader-footer,
-#app:-webkit-full-screen .reader-footer {
-  background: #000;
+#app:fullscreen .fullscreen-icon,
+#app:-webkit-full-screen .fullscreen-icon {
+  background: rgba(255, 255, 255, 0.12);
   color: #fff;
-  border-color: #444;
-}
-#app:fullscreen .reader-comic-title,
-#app:-webkit-full-screen .reader-comic-title,
-#app:fullscreen .back-link,
-#app:-webkit-full-screen .back-link,
-#app:fullscreen .fullscreen-btn,
-#app:-webkit-full-screen .fullscreen-btn {
-  color: #fff;
-  border-color: #fff;
 }
 
 #app:fullscreen .art-detail img,
@@ -717,8 +730,8 @@ h1, h2, h3, .display {
 .reader-next:hover:not(:disabled) { background: var(--clr-red); }
 
 .reader-footer {
-  border-top: 3px solid var(--clr-ink);
-  padding: 14px 20px 26px;
+  border-top: 2px solid var(--clr-ink);
+  padding: 10px 16px 18px;
 }
 
 .reader-page-jump {
@@ -729,7 +742,7 @@ h1, h2, h3, .display {
   font-family: "Baumans", sans-serif;
   font-weight: 900;
   font-size: 0.95rem;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 #reader-page-input {
@@ -875,7 +888,7 @@ h1, h2, h3, .display {
 
 /* ── mobile ────────────────────────────────────────────────── */
 @media (max-width: 600px) {
-  .reader-nav { width: 44px; height: 64px; }
+  .reader-nav { display: none; }
   .reader-viewport img { max-height: 62vh; }
   .carousel-nav { width: 44px; height: 44px; }
 
@@ -883,8 +896,10 @@ h1, h2, h3, .display {
      header content on narrow screens. */
   .lang-toggle { top: 8px; right: 8px; padding: 4px 8px; font-size: 0.65rem; }
   .reader-header { padding-right: 92px; flex-wrap: wrap; }
+  .reader-header-top { flex-direction: column; align-items: flex-start; gap: 4px; }
   .section-header { padding-right: 92px; }
   .fullscreen-btn { font-size: 0.68rem; padding: 6px 8px; }
+  .fullscreen-icon { bottom: 16px; right: 16px; width: 34px; height: 34px; padding: 5px; }
 }
 
 /* ══════════════════════════════════════════════════════════════

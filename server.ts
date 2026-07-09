@@ -416,10 +416,17 @@ async function generateSmall(originalPath: string): Promise<boolean> {
   try { await Deno.stat(smallDir); } catch {
     await Deno.mkdir(smallDir, { recursive: true });
   }
+  // Write to a temp file first, then atomically rename to the final path.
+  // If the process dies mid-conversion the partial file is never served —
+  // resolveImageUrl only looks for the final name.
+  const tmp = `${derivative}.tmp`;
+  // Clean up any stale temp file from a previous crash.
+  try { await Deno.remove(tmp); } catch { /* didn't exist */ }
   let origSize = 0;
   try { origSize = (await Deno.stat(originalPath)).size; } catch { /* ignore */ }
-  const r = await runCmd(resizeArgs(originalPath, derivative, outExt));
+  const r = await runCmd(resizeArgs(originalPath, tmp, outExt));
   if (r.code === 0) {
+    await Deno.rename(tmp, derivative);
     const fmt = outExt.slice(1);
     let pct = "";
     try {
@@ -430,8 +437,12 @@ async function generateSmall(originalPath: string): Promise<boolean> {
     } catch { /* ignore */ }
     console.log(`[comic-server] resized ${basenameOf(originalPath)} (${dims.w}×${dims.h} → ≤${resizeMaxDim}px, ${fmt} q${resizeQuality}${pct})`);
     return true;
-  } else if (r.stderr) {
-    console.log(`[comic-server] resize failed: ${basenameOf(originalPath)} — ${r.stderr.trim()}`);
+  } else {
+    // Remove the partial temp file on failure.
+    try { await Deno.remove(tmp); } catch { /* ignore */ }
+    if (r.stderr) {
+      console.log(`[comic-server] resize failed: ${basenameOf(originalPath)} — ${r.stderr.trim()}`);
+    }
   }
   return false;
 }

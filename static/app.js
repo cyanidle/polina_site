@@ -5,6 +5,11 @@
  * Server API: /api/comics/<lang>, /api/comics/<lang>/<name>, /api/arts.
  */
 
+// ── fullscreen icons (inline SVG) ──────────────────────────
+
+const FS_ENTER = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="7,1 17,1 17,11"/><polyline points="11,17 1,17 1,7"/></svg>`;
+const FS_EXIT  = `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="11,1 1,1 1,11"/><polyline points="7,17 17,17 17,7"/></svg>`;
+
 // ── i18n ─────────────────────────────────────────────────────
 
 const STRINGS = {
@@ -308,9 +313,16 @@ function setupFullscreenButton(btn, el) {
 
   if (!btn || !fullscreenSupported()) { btn?.classList.add("hidden"); return; }
 
+  const isIcon = btn.classList.contains("fullscreen-icon");
+
   const update = () => {
     const active = fullscreenElement() === el;
-    btn.textContent = active ? t("exitFullscreen") : t("fullscreen");
+    if (isIcon) {
+      btn.innerHTML = active ? FS_EXIT : FS_ENTER;
+      btn.setAttribute("aria-label", active ? t("exitFullscreen") : t("fullscreen"));
+    } else {
+      btn.textContent = active ? t("exitFullscreen") : t("fullscreen");
+    }
   };
   update();
 
@@ -640,13 +652,13 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
             ${comic.chapters.length > 1 ? `<div class="reader-chapter-title">${escapeHTML(chapter.name)}</div>` : ""}
           </div>
         </div>
-        <button class="btn-ghost fullscreen-btn" id="reader-fullscreen">${escapeHTML(t("fullscreen"))}</button>
       </div>
 
       <div class="reader-viewport" id="reader-viewport">
         <button class="reader-nav reader-prev" id="reader-prev" aria-label="${escapeHTML(t("prev"))}" ${prevDisabled ? "disabled" : ""}>‹</button>
         <img id="reader-image" src="${escapeHTML(page.url)}" alt="${escapeHTML(page.file)}">
         <button class="reader-nav reader-next" id="reader-next" aria-label="${escapeHTML(t("next"))}" ${nextDisabled ? "disabled" : ""}>›</button>
+        <button class="fullscreen-icon" id="reader-fullscreen" aria-label="${escapeHTML(t("fullscreen"))}"></button>
       </div>
 
       <div class="reader-footer">
@@ -705,9 +717,20 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
   }
   document.addEventListener("keydown", onKeydown);
 
-  // swipe support
+  // tap left/right half of the viewport to navigate, plus swipe gesture
+  // (the nav buttons are hidden on narrow screens via CSS)
   let touchStartX = 0, touchStartY = 0;
   const $viewport = document.getElementById("reader-viewport");
+
+  // click: tap left half → prev, right half → next
+  $viewport.addEventListener("click", (e) => {
+    if (e.target.closest("button, input, a")) return;
+    const rect = $viewport.getBoundingClientRect();
+    const xRatio = (e.clientX - rect.left) / rect.width;
+    if (xRatio < 0.5) goPrev(); else goNext();
+  });
+
+  // touch: swipe left → next, swipe right → prev
   $viewport.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) return;
     touchStartX = e.touches[0].clientX;
@@ -717,6 +740,7 @@ async function renderReader(lang, name, chapterIdx, pageIdx) {
     if (e.changedTouches.length !== 1) return;
     const dx = e.changedTouches[0].clientX - touchStartX;
     const dy = e.changedTouches[0].clientY - touchStartY;
+    // require a meaningful horizontal swipe with horizontal dominance
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
     if (dx < 0) goNext(); else goPrev();
   }, { passive: true });
