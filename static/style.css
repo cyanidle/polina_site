@@ -670,12 +670,18 @@ h1, h2, h3, .display {
 #app:-webkit-full-screen .reader-nav {
   display: none;
 }
+/* Viewport images — both reader and art detail — fill the screen in
+   fullscreen. Chrome (headers, footers, nav, titles) is hidden. */
 #app:fullscreen .reader-viewport,
-#app:-webkit-full-screen .reader-viewport {
+#app:-webkit-full-screen .reader-viewport,
+#app:fullscreen .art-viewport,
+#app:-webkit-full-screen .art-viewport {
   overflow: hidden;
 }
 #app:fullscreen .reader-viewport img,
-#app:-webkit-full-screen .reader-viewport img {
+#app:-webkit-full-screen .reader-viewport img,
+#app:fullscreen .art-viewport img,
+#app:-webkit-full-screen .art-viewport img {
   max-width: 100vw;
   max-height: 100vh;
   border: none;
@@ -686,11 +692,20 @@ h1, h2, h3, .display {
   color: #fff;
 }
 
-#app:fullscreen .art-detail img,
-#app:-webkit-full-screen .art-detail img {
-  max-width: 100vw;
-  max-height: 100vh;
-  object-fit: contain;
+#app:fullscreen .container,
+#app:-webkit-full-screen .container {
+  display: none;
+}
+#app:fullscreen .art-detail-title,
+#app:-webkit-full-screen .art-detail-title,
+#app:fullscreen .art-detail-description,
+#app:-webkit-full-screen .art-detail-description {
+  display: none;
+}
+#app:fullscreen .art-detail,
+#app:-webkit-full-screen .art-detail {
+  padding: 0;
+  gap: 0;
   background: #000;
 }
 
@@ -798,7 +813,17 @@ h1, h2, h3, .display {
   gap: 24px;
 }
 
-.art-detail img {
+.art-viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+  width: 100%;
+}
+
+.art-viewport img {
   max-width: min(90vw, 720px);
   max-height: 70vh;
   object-fit: contain;

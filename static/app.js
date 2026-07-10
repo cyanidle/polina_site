@@ -802,10 +802,12 @@ async function renderArtDetail(file) {
         </div>
       </div>
       <div class="art-detail">
-        <img id="art-image" src="${escapeHTML(art.url)}" alt="${escapeHTML(art.title)}">
+        <div class="art-viewport" id="art-viewport">
+          <img id="art-image" src="${escapeHTML(art.url)}" alt="${escapeHTML(art.title)}">
+          <button class="fullscreen-icon" id="art-fullscreen" aria-label="${escapeHTML(t("fullscreen"))}"></button>
+        </div>
         <h1 class="art-detail-title">${escapeHTML(art.title)}</h1>
         ${art.description ? `<p class="art-detail-description">${escapeHTML(art.description)}</p>` : ""}
-        <button class="btn btn-yellow" id="art-fullscreen">${escapeHTML(t("fullscreen"))}</button>
       </div>
     </div>`;
   bindNav();
