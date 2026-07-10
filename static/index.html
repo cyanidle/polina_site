@@ -8,6 +8,23 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Baumans&family=Baumans:wght@500;700;900&display=swap" rel="stylesheet">
+  <script>
+    // Hide the language toggle before first paint when on a detail page
+    // (comic detail/reader, art detail, character detail). It stays visible
+    // on the landing page and all list/grid pages.
+    (function() {
+      var hash = (location.hash || "").replace(/^#\/?/, "");
+      if (!hash) return; // landing — visible by default
+      var segs = hash.split("/").map(decodeURIComponent);
+      // detail pages: comics/<lang>/<name>, arts/<file>, characters/<name>
+      if ((segs[0] === "comics" && segs.length >= 3) ||
+          (segs[0] === "arts" && segs.length >= 2) ||
+          (segs[0] === "characters" && segs.length >= 2)) {
+        var el = document.getElementById("lang-toggle");
+        if (el) el.style.display = "none";
+      }
+    })();
+  </script>
 </head>
 <body>
   <button id="lang-toggle" class="lang-toggle" title="RU / EN">

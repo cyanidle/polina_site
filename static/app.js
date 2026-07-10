@@ -349,11 +349,15 @@ function parseHash() {
 
 async function render() {
   const route = parseHash();
-  // Hide the language toggle on content pages (comic/arts/character),
-  // keep it visible only on the landing page.
   const $langToggle = document.getElementById("lang-toggle");
   if ($langToggle) {
-    $langToggle.style.display = route.length === 0 ? "" : "none";
+    // Hide on detail pages (comic detail/reader, art detail, character detail),
+    // show on landing and list/grid pages.
+    const isDetail =
+      (route[0] === "comics" && route.length >= 3) ||
+      (route[0] === "arts" && route.length >= 2) ||
+      (route[0] === "characters" && route.length >= 2);
+    $langToggle.style.display = isDetail ? "none" : "";
   }
   renderLangToggle();
 
