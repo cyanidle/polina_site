@@ -3,18 +3,21 @@ import { basename as pathBasename, dirname as pathDirname, extname as pathExtnam
 /**
  * Webcomic server — auto-discovers comics and art from the filesystem.
  *
- * Uses Deno.watchFs to monitor comics/ and arts/, so new content dropped
- * into either folder appears immediately — no restart and no per-request
+ * Uses Deno.watchFs to monitor the site root, so new content dropped
+ * into any folder appears immediately — no restart and no per-request
  * scanning.
  *
- * Layout:
- *   comics/<lang>/<comic>/<page files>            single-chapter comic
- *   comics/<lang>/<comic>/<chapter>/<page files>   multi-chapter comic
- *   comics/<lang>/<comic>/teaser/<image files>     carousel images (not chapter pages —
- *                                                  e.g. textless art), shown in file order
- *   comics/<lang>/<comic>/meta.json                optional metadata (see below)
- *   arts/<file>                                    a piece of art
- *   arts/<file>.txt                                optional description sidecar
+ * All content lives under a single root directory (POLINA_SITE env var, default: cwd):
+ *
+ *   <root>/comics/<lang>/<comic>/<page files>            single-chapter comic
+ *   <root>/comics/<lang>/<comic>/<chapter>/<page files>   multi-chapter comic
+ *   <root>/comics/<lang>/<comic>/teaser/<image files>     carousel images (not chapter pages —
+ *                                                        e.g. textless art), shown in file order
+ *   <root>/comics/<lang>/<comic>/meta.json                optional metadata (see below)
+ *   <root>/arts/<file>                                    a piece of art
+ *   <root>/arts/<file>.txt                                optional description sidecar
+ *   <root>/characters/<name>/<image files>                character gallery (one folder per character)
+ *   <root>/characters/<name>/<image>.txt                  optional per-image description
  *
  * meta.json (all fields optional):
  *   {
@@ -39,8 +42,7 @@ import { basename as pathBasename, dirname as pathDirname, extname as pathExtnam
  *   deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts 0.0.0.0 9090   # custom host/port
  *
  * Env vars (optional; --allow-env is required regardless of whether they're set):
- *   COMICS_DIR   where comics/ content lives — absolute, or relative to cwd (default "comics")
- *   ARTS_DIR     where arts/ content lives — absolute, or relative to cwd (default "arts")
+ *   POLINA_SITE  root directory with comics/, arts/, characters/ subdirs — absolute, or relative to cwd (default: cwd)
  *
  *   IMAGE_RESIZE_ENABLED       "1"/"true" to downscale large images on the fly (default: true)
  *   IMAGE_RESIZE_MAX_DIM       max width/height of the derivative, in px (default: 1600)
@@ -68,8 +70,10 @@ function resolveDir(envVarName: string, defaultName: string): string {
   return resolved;
 }
 
-const COMICS_DIR = resolveDir("COMICS_DIR", "comics");
-const ARTS_DIR = resolveDir("ARTS_DIR", "arts");
+const SITE_DIR = resolveDir("POLINA_SITE", ".");
+const COMICS_DIR = `${SITE_DIR}/comics`;
+const ARTS_DIR = `${SITE_DIR}/arts`;
+const CHARACTERS_DIR = `${SITE_DIR}/characters`;
 const STATIC_DIR = `${ROOT}static`;
 
 const LANGS = ["ru", "en"];
@@ -78,10 +82,7 @@ const LANGS = ["ru", "en"];
 // discovery so it never gets treated as a chapter itself.
 const TEASER_DIRNAME = "teaser";
 
-// Reserved subdirectory under ARTS_DIR holding the character gallery
-// (one image per character + optional <name>.txt). It's a directory, so the
-// flat arts scan (isFile filter) skips it automatically.
-const CHARACTERS_DIRNAME = "characters";
+// Reserved subdirectory under ARTS_DIR that is skipped by the flat arts scan
 
 // Derivatives live in a `small/` subdirectory next to the original, e.g.
 // /comics/ru/Test/page.png -> /comics/ru/Test/small/page.webp.
@@ -630,19 +631,18 @@ async function scanArts(): Promise<Art[]> {
   return result;
 }
 
-// Character gallery — arts/characters/<name>/ is one folder per character,
+// Character gallery — characters/<name>/ is one folder per character,
 // holding any number of images, each with an optional <image>.txt sidecar
 // for a per-picture description. The folder name is the character name; its
 // first image (natural sort) is the cover. Loose files directly under
-// arts/characters/ (not in a subfolder) and empty folders are ignored.
+// characters/ (not in a subfolder) and empty folders are ignored.
 async function scanCharacters(): Promise<CharacterEntry[]> {
-  const base = `${ARTS_DIR}/${CHARACTERS_DIRNAME}`;
-  const dirs = (await readDirSafe(base)).filter((e) => e.isDirectory).map((e) => e.name);
+  const dirs = (await readDirSafe(CHARACTERS_DIR)).filter((e) => e.isDirectory).map((e) => e.name);
   dirs.sort(naturalCompare);
 
   const result: CharacterEntry[] = [];
   for (const name of dirs) {
-    const dir = `${base}/${name}`;
+    const dir = `${CHARACTERS_DIR}/${name}`;
     const files = await readImageFiles(dir);
     if (files.length === 0) continue;
 
@@ -654,7 +654,7 @@ async function scanCharacters(): Promise<CharacterEntry[]> {
       try {
         description = (await Deno.readTextFile(`${dir}/${bare}.txt`)).trim();
       } catch { /* no sidecar */ }
-      images.push({ file, description, url: await resolveImageUrl(dir, file, ["arts", CHARACTERS_DIRNAME, name]) });
+      images.push({ file, description, url: await resolveImageUrl(dir, file, ["characters", name]) });
     }
     result.push({ name, cover: images[0].url, images });
   }
@@ -685,19 +685,19 @@ async function purgeDerivatives(root: string): Promise<number> {
 }
 
 async function scan(): Promise<void> {
-  console.log(`[comic-server] scanning ${COMICS_DIR} and ${ARTS_DIR}...`);
+  console.log(`[comic-server] scanning ${SITE_DIR}…`);
   const next: Record<string, ComicDetail[]> = {};
   for (const lang of LANGS) next[lang] = await scanComicsForLang(lang);
   comicsByLang = next;
   arts = await scanArts();
   characters = await scanCharacters();
-  console.log(`[comic-server]   + ${arts.length} art file(s) in ${ARTS_DIR}`);
-  console.log(`[comic-server]   + ${characters.length} character(s) in ${ARTS_DIR}/${CHARACTERS_DIRNAME}`);
+  console.log(`[comic-server]   + ${arts.length} art file(s)`);
+  console.log(`[comic-server]   + ${characters.length} character(s)`);
 }
 
 // ── filesystem watcher ─────────────────────────────────────────
 
-function startWatcher(): Deno.FsWatcher[] {
+function startWatcher(): Deno.FsWatcher {
   const DEBOUNCE_MS = 200;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -711,16 +711,11 @@ function startWatcher(): Deno.FsWatcher[] {
     }, DEBOUNCE_MS);
   };
 
-  const watchers = [
-    Deno.watchFs(COMICS_DIR, { recursive: true }),
-    Deno.watchFs(ARTS_DIR, { recursive: true }),
-  ];
-  for (const watcher of watchers) {
-    (async () => {
-      for await (const _event of watcher) rescan();
-    })();
-  }
-  return watchers;
+  const watcher = Deno.watchFs(SITE_DIR, { recursive: true });
+  (async () => {
+    for await (const _event of watcher) rescan();
+  })();
+  return watcher;
 }
 
 // ── file serving ───────────────────────────────────────────────
@@ -804,14 +799,18 @@ async function handle(req: Request): Promise<Response> {
     return json(resolveComicDetail(comic, uiLang));
   }
 
-  // Comic / art images — served from the (possibly overridden) COMICS_DIR /
-  // ARTS_DIR, not literally "<ROOT>/comics" or "<ROOT>/arts".
+  // Comic, art, and character images — served from the real content dirs,
+  // not literally "<ROOT>/comics" etc.
   if (path.startsWith("/comics/")) {
     const filePath = `${COMICS_DIR}/${path.slice("/comics/".length)}`;
     return await serveFile(filePath);
   }
   if (path.startsWith("/arts/")) {
     const filePath = `${ARTS_DIR}/${path.slice("/arts/".length)}`;
+    return await serveFile(filePath);
+  }
+  if (path.startsWith("/characters/")) {
+    const filePath = `${CHARACTERS_DIR}/${path.slice("/characters/".length)}`;
     return await serveFile(filePath);
   }
 
@@ -852,9 +851,7 @@ async function main() {
   // One-shot purge of all existing derivatives so they regenerate with
   // current settings (set IMAGE_RESIZE_FORCE=1 to trigger this).
   if (resizeForce && resizeActive) {
-    await Promise.all([purgeDerivatives(COMICS_DIR), purgeDerivatives(ARTS_DIR)]);
-    // Count is omitted from the log (could be thousands) but the function
-    // returns it; a manual count is `find … -type d -name small | wc -l`.
+    await purgeDerivatives(SITE_DIR);
     console.log("[comic-server] image resize: purged old derivatives for regeneration");
     resizeForce = false;
   }
@@ -863,12 +860,12 @@ async function main() {
   await scan();
 
   // Watch for changes
-  const watchers = startWatcher();
+  const watcher = startWatcher();
 
   // Shutdown cleanup
   const shutdown = () => {
     console.log("\nshutting down…");
-    for (const w of watchers) { try { w.close(); } catch { /* ok */ } }
+    try { watcher.close(); } catch { /* ok */ }
     Deno.exit(0);
   };
   Deno.addSignalListener("SIGINT", shutdown);
@@ -881,10 +878,12 @@ async function main() {
 
   const total = LANGS.reduce((n, l) => n + (comicsByLang[l]?.length ?? 0), 0);
   console.log(`webcomic server @ http://${hostname}:${port}`);
-  console.log(`  comics dir : ${COMICS_DIR} (langs: ${LANGS.join(", ")})`);
-  console.log(`  arts dir   : ${ARTS_DIR}`);
+  console.log(`  site dir   : ${SITE_DIR}`);
+  console.log(`    comics/  : ${COMICS_DIR} (langs: ${LANGS.join(", ")})`);
+  console.log(`    arts/    : ${ARTS_DIR}`);
+  console.log(`    characters/: ${CHARACTERS_DIR}`);
   console.log(`  static dir : ${STATIC_DIR}`);
-  console.log(`  comics found: ${total}, arts found: ${arts.length}`);
+  console.log(`  comics found: ${total}, arts found: ${arts.length}, characters found: ${characters.length}`);
   if (hostname === "127.0.0.1") {
     console.log("  (localhost only — put nginx in front for public access)");
   }

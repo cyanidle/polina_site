@@ -5,18 +5,18 @@
 #
 # To *regenerate* all derivatives (e.g. after changing resize settings),
 # delete the small/ dirs first and restart the server:
-#   find COMICS_DIR ARTS_DIR -type d -name small -exec rm -rf {} +
+#   find POLINA_SITE -type d -name small -exec rm -rf {} +
 #   IMAGE_RESIZE_FORCE=1 deno run … server.ts   # (optional; forces a fresh scan)
 #   ./ensure-small-dirs.sh
 
 set -euo pipefail
 
-COMICS_DIR="${COMICS_DIR:-comics}"
-ARTS_DIR="${ARTS_DIR:-arts}"
+SITE_DIR="${POLINA_SITE:-.}"
 DIRS=()
-[ -d "$COMICS_DIR" ] && DIRS+=("$COMICS_DIR")
-[ -d "$ARTS_DIR" ] && DIRS+=("$ARTS_DIR")
-[ ${#DIRS[@]} -eq 0 ] && echo "Neither $COMICS_DIR nor $ARTS_DIR found (run from repo root or set env)" && exit 1
+for sub in comics arts characters; do
+  [ -d "$SITE_DIR/$sub" ] && DIRS+=("$SITE_DIR/$sub")
+done
+[ ${#DIRS[@]} -eq 0 ] && echo "No comics/ arts/ or characters/ found under $SITE_DIR (run from repo root or set POLINA_SITE)" && exit 1
 
 for root in "${DIRS[@]}"; do
   find "$root" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.gif' -o -name '*.bmp' \) \
@@ -26,4 +26,4 @@ for root in "${DIRS[@]}"; do
   done
 done
 
-echo "small/ directories created under $COMICS_DIR and $ARTS_DIR."
+echo "small/ directories created under $SITE_DIR/comics, $SITE_DIR/arts, $SITE_DIR/characters."

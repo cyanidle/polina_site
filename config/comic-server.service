@@ -17,8 +17,7 @@ Type=simple
 WorkingDirectory=/path/to/polina_site   # ← change me
 ExecStart=/path/to/polina_site/scripts/start.sh # ← change me
 # User=www-data                          # ← uncomment and set if not running as root
-# Environment=COMICS_DIR=/data/comics     # ← optional, see server.ts
-# Environment=ARTS_DIR=/data/arts         # ← optional, see server.ts
+# Environment=POLINA_SITE=/data/polina     # ← optional, see server.ts
 # Environment=IMAGE_RESIZE_ENABLED=true   # ← optional; on by default. Needs ImageMagick (already has --allow-run via start.sh)
 # Environment=IMAGE_RESIZE_MAX_DIM=1600   # ← optional; max side in px of the downscaled derivative
 Restart=on-failure

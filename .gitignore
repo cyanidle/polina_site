@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 comics/
 arts/
-node_modules/
+characters/
 compose/.env
 compose/cloudflare.ini
 vendor/
