@@ -349,6 +349,12 @@ function parseHash() {
 
 async function render() {
   const route = parseHash();
+  // Hide the language toggle on content pages (comic/arts/character),
+  // keep it visible only on the landing page.
+  const $langToggle = document.getElementById("lang-toggle");
+  if ($langToggle) {
+    $langToggle.style.display = route.length === 0 ? "" : "none";
+  }
   renderLangToggle();
 
   try {
