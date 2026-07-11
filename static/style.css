@@ -676,6 +676,7 @@ h1, h2, h3, .display {
 #app:fullscreen .art-viewport,
 #app:-webkit-full-screen .art-viewport {
   overflow: hidden;
+  padding: 0;
 }
 #app:fullscreen .reader-viewport img,
 #app:-webkit-full-screen .reader-viewport img,
