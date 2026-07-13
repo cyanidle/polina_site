@@ -412,6 +412,23 @@ function landingShapes() {
     </div>`;
 }
 
+function pageHeader({ title = "", backPath, backLabel, langVisible = false }) {
+  const classes = [
+    "section-header",
+    title ? "" : "section-header-compact",
+    langVisible ? "section-header-lang-visible" : "",
+  ].filter(Boolean).join(" ");
+
+  return `
+    <div class="${classes}">
+      <button class="site-brand" data-nav="/" aria-label="Hardgrizz Comics — ${escapeHTML(t("home"))}">
+        <span class="site-brand-text">HG Comics</span>
+      </button>
+      ${title ? `<h2 class="section-title">${escapeHTML(title)}</h2>` : ""}
+      <button class="back-link" data-nav="${escapeHTML(backPath)}">← ${escapeHTML(backLabel)}</button>
+    </div>`;
+}
+
 async function renderLanding() {
   document.title = "Hardgrizz Comics";
   $app.innerHTML = `
@@ -453,10 +470,7 @@ async function renderComicsGrid(lang) {
   $app.innerHTML = `
     <div class="view">
       <div class="container">
-        <div class="section-header">
-          <h2 class="section-title">${escapeHTML(t("comics"))}</h2>
-          <button class="back-link" data-nav="/">← ${escapeHTML(t("home"))}</button>
-        </div>
+        ${pageHeader({ title: t("comics"), backPath: "/", backLabel: t("home"), langVisible: true })}
         <div class="grid" id="comics-grid">
           <p class="placeholder">${escapeHTML(t("loading"))}</p>
         </div>
@@ -503,9 +517,7 @@ async function renderComicDetail(lang, name) {
   $app.innerHTML = `
     <div class="view comic-detail">
       <div class="container">
-        <div class="section-header">
-          <button class="back-link" data-nav="/comics">← ${escapeHTML(t("backToComics"))}</button>
-        </div>
+        ${pageHeader({ backPath: "/comics", backLabel: t("backToComics") })}
 
         <div class="comic-top">
           <div class="carousel" id="carousel">
@@ -751,10 +763,7 @@ async function renderArtsGrid() {
   $app.innerHTML = `
     <div class="view">
       <div class="container">
-        <div class="section-header">
-          <h2 class="section-title">${escapeHTML(t("arts"))}</h2>
-          <button class="back-link" data-nav="/">← ${escapeHTML(t("home"))}</button>
-        </div>
+        ${pageHeader({ title: t("arts"), backPath: "/", backLabel: t("home"), langVisible: true })}
         <div class="grid" id="arts-grid">
           <p class="placeholder">${escapeHTML(t("loading"))}</p>
         </div>
@@ -790,9 +799,7 @@ async function renderArtDetail(file) {
   $app.innerHTML = `
     <div class="view">
       <div class="container">
-        <div class="section-header">
-          <button class="back-link" data-nav="/arts">← ${escapeHTML(t("backToArts"))}</button>
-        </div>
+        ${pageHeader({ backPath: "/arts", backLabel: t("backToArts") })}
       </div>
       <div class="art-detail">
         <div class="art-viewport" id="art-viewport">
@@ -812,10 +819,7 @@ async function renderCharactersGrid() {
   $app.innerHTML = `
     <div class="view">
       <div class="container">
-        <div class="section-header">
-          <h2 class="section-title">${escapeHTML(t("charactersTab"))}</h2>
-          <button class="back-link" data-nav="/">← ${escapeHTML(t("home"))}</button>
-        </div>
+        ${pageHeader({ title: t("charactersTab"), backPath: "/", backLabel: t("home"), langVisible: true })}
         <div class="grid" id="characters-grid">
           <p class="placeholder">${escapeHTML(t("loading"))}</p>
         </div>
@@ -852,10 +856,7 @@ async function renderCharacterDetail(name) {
   $app.innerHTML = `
     <div class="view">
       <div class="container">
-        <div class="section-header">
-          <h2 class="section-title">${escapeHTML(character.name)}</h2>
-          <button class="back-link" data-nav="/characters">← ${escapeHTML(t("backToCharacters"))}</button>
-        </div>
+        ${pageHeader({ title: character.name, backPath: "/characters", backLabel: t("backToCharacters") })}
         <div class="character-gallery">
           ${character.images.map((img) => `
             <figure class="character-figure">
