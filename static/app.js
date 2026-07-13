@@ -334,7 +334,10 @@ function setupFullscreenButton(btn, el) {
   };
   update();
 
-  const onClick = () => toggleFullscreen(el);
+  const onClick = (event) => {
+    event.stopPropagation();
+    toggleFullscreen(el);
+  };
   const onKeydown = (event) => {
     if (event.key === "Escape" && fullscreenActive(el)) toggleFullscreen(el);
   };
