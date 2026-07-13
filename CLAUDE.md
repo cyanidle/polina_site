@@ -1,53 +1,107 @@
 # CLAUDE.md
 
-Hardgrizz-styled webcomic + art site. Deno backend, vanilla JS SPA frontend, no build step, no npm/deno dependencies (aside from Google Fonts loaded via `<link>`), no database.
+## Project
 
-## Run
+Hardgrizz Comics is a Deno 2 backend and vanilla-JavaScript SPA. It has no database, frontend framework, npm packages, or build step. `@std/path` is locked and vendored by Deno.
 
-```bash
-deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts              # dev: http://127.0.0.1:8080
-deno task dev                                              # same, via deno.json
-deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts 0.0.0.0 9090  # custom host/port (positional args)
-POLINA_SITE=/data/polina deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts  # custom content root (env var)
+User content is gitignored and lives below one root:
+
+```text
+<POLINA_SITE>/comics/{ru,en}/<comic>/
+<POLINA_SITE>/arts/
+<POLINA_SITE>/characters/<character>/
 ```
 
-`--allow-run=magick,convert,identify` is needed only for the optional on-the-fly image resize (see below); omit it if resize is disabled (`IMAGE_RESIZE_ENABLED=false`) or ImageMagick isn't installed — the server runs fine without it.
+`POLINA_SITE` defaults to the repository working directory. `static/` always resolves from the working directory, so run commands from the repository root. Do not commit content or generated `small/` directories.
 
-No test suite or linter config. Verify changes by running the server and hitting `curl http://127.0.0.1:8080/api/health`, and by driving the actual pages in a browser — this is a UI-heavy app; typechecking (`deno check server.ts`) does not catch broken frontend flows.
+## Commands
 
-## Layout
+```bash
+deno task dev
+deno check server.ts static/app.js
+bash -n scripts/*.sh
+git diff --check
+```
 
-- `server.ts` — the entire backend (single file). Serves `static/`, `/comics/`, `/arts/`, and `/characters/` images, and the JSON API. All content is scanned into an in-memory cache at startup and refreshed by a debounced `Deno.watchFs` watcher on `comics/`, `arts/`, and `characters/` — API handlers never touch the disk directly.
-- `static/index.html` — thin SPA shell: one `#app` mount point, a `#site-footer` disclaimer, Google Fonts link (Baumans), a fixed RU/EN language toggle.
-- 18+ gate + disclaimer: a persistent footer (`#site-footer`, filled by `renderDisclaimer()` from the `disclaimer` UI string) and a first-visit-only age gate (`renderAgeGate()` in `app.js`). The gate is a `.age-gate` overlay appended to `<body>`, shown unless `localStorage.ageConfirmed === "yes"`; "I am 18 or older" sets that flag and removes it, "Leave" redirects to google.com. Both re-render on the RU/EN toggle (`setSiteLang` calls `renderDisclaimer()`/`renderAgeGate()`), so the gate's text updates live if it's still open. Neither is part of the `#app` router re-render — they live outside `#app` and persist across navigation.
-- `static/app.js` — hash-based router (`#/`, `#/comics`, `#/comics/<lang>/<name>`, `#/comics/<lang>/<name>/read/<chapterIdx>/<pageIdx>`, `#/arts`, `#/arts/<file>`, `#/characters`, `#/characters/<name>`) plus all view-rendering functions. Bilingual UI strings live in the `STRINGS` object; `siteLang` persists in `localStorage`. The comics list (`#/comics`) always renders for the current `siteLang` (the RU/EN toggle), with no language-picker step — the toggle both switches UI language and selects which `comics/<lang>/` collection is listed. `#/comics/<lang>` (length-2) is a legacy URL shape still routed to the list, but it too shows the switch's language, not the URL's. Comic detail/reader keep `<lang>` in the URL because a comic belongs to a specific `comics/<lang>/` folder; toggling the switch there re-resolves UI text via `uiLang` but does not move you to a different comic.
-- `static/style.css` — Hardgrizz theme: white background, sharp corners (`--radius: 0`), red/yellow/blue CSS variables, `Baumans` for headings/buttons, `Baumans` for body text, hard drop-shadow buttons/cards (`box-shadow: 5px 5px 0 var(--clr-ink)`).
-- Content directory locations are configurable via the `POLINA_SITE` env var (`resolveDir()` in `server.ts`) — absolute path, or relative to `Deno.cwd()`; defaults to `Deno.cwd()` (so it looks for `comics/`, `arts/`, `characters/` under the repo root). `--allow-env` is always required to run the server, even if you don't set these vars — `Deno.env.get()` throws `NotCapable` without it regardless of whether the variable exists.
-- `comics/<lang>/<name>/` — content, **gitignored**. `<lang>` is `ru` or `en`. If the comic folder has subdirectories (other than `teaser/`, see below), each subdirectory is a chapter; otherwise it's a single flat chapter. Optional `meta.json` per comic (title, description, cover, characters, per-page comments/dates) — see `UPLOADING.md` for the schema. Text fields (`title`, `description`, `character.about`, `page.comment`) may be a plain string or a `{ "ru": "...", "en": "..." }` object (`Localized` type in `server.ts`); the API resolves it per-request from the `uiLang` query param (`pickLocale`/`resolveComicDetail`/`resolveComicSummary`), falling back to the comic's own `<lang>`, then to whatever translation exists. The frontend passes `?uiLang=<siteLang>` on every comics fetch so switching the RU/EN toggle re-resolves text without needing separate `<lang>` folders per translation.
-- `comics/<lang>/<name>/teaser/` — optional carousel images for the comic detail page (e.g. textless art, not chapter pages). Reserved dirname (`TEASER_DIRNAME` in `server.ts`) excluded from chapter discovery; images shown in filename sort order via `naturalCompare`. No `meta.json` field for this anymore — it used to be `meta.teaser: string[]` pointing at chapter page filenames, replaced by this dedicated directory.
-- `arts/` — content, **gitignored**. Flat: one image per artwork, optional sidecar `<name>.txt` for its description.
-- `characters/<name>/` — optional character gallery, **gitignored**. One **folder per character** under `CHARACTERS_DIR`; the folder name is the character name. Each folder holds an arbitrary number of images, each with an optional `<image>.txt` sidecar for a per-picture description; images are natural-sorted and the first is the cover. Empty folders are ignored. Served as `GET /api/characters?uiLang=<ru|en>` (`scanCharacters`) returning `[{name, cover, images: [{file, url, description}], comics: [{lang, name, title}]}]`, shown under the landing "Персонажи"/"Characters" tab (`#/characters` grid, `#/characters/<name>` detail — a vertical gallery of every image + its caption, plus an "appears in comics" list of links). The `comics` field is computed per-request by `comicsForCharacter()`/`resolveCharacter()` in `server.ts`: every comic across all languages whose `meta.json` references this character by name (case-insensitive), with the title resolved for `uiLang`. A comic's `meta.json` `characters[].name` is matched **case-insensitively** against the folder names in `resolveComicDetail`; on a match the character gets a `link` field (the gallery folder name, in its own casing) and the frontend renders its label on the comic-detail page as a link to `#/characters/<name>` (`.character-link`), otherwise it stays plain text. Images are served by the `/characters/` route.
-- `UPLOADING.md` — brief content-authoring guide (Russian, with layout examples) for the non-technical artist adding comics/art. Keep it short; update it if the `meta.json` schema or folder conventions change.
-- `config/nginx.conf` / `config/apache.conf` — equivalent production reverse-proxy configs (nginx and Apache): serve static + `/comics/` + `/arts/` directly with 7-day immutable cache headers on images, proxy `/api/` to Deno on 127.0.0.1:8080. Keep the two in sync when changing routing/caching. Both use `/path/to/polina_site` placeholder paths.
-- `config/comic-server.service` — systemd unit that runs `scripts/start.sh`.
-- `deno.json` / `.vscode/settings.json` — `deno task dev` and editor Deno-LSP support (`.vscode` is gitignored, local-only).
-- `scripts/start.sh` — thin wrapper that runs `deno run ...`; exists so `comic-server.service` manages a shell script instead of invoking `deno` directly.
-- `scripts/deploy.sh` — rsyncs source (not `comics/`/`arts/`) to production and optionally restarts the service; has placeholder `REMOTE_HOST`/`REMOTE_PATH`/`RESTART_CMD` to fill in.
-- `scripts/ensure-small-dirs.sh` / `scripts/purge-small-dirs.sh` — pre-create or clean up `small/` derivative directories (see resize in Conventions).
+Without ImageMagick:
 
-## Conventions & gotchas
+```bash
+IMAGE_RESIZE_ENABLED=false \
+  deno run --allow-net --allow-read --allow-env server.ts
+```
 
-- Keep it dependency-free: backend uses only the `Deno` global; frontend is framework-free (no bundler, no npm). Don't introduce these without being asked.
-- Frontend must stay server-agnostic: use relative URLs only (`/api/...`, `/comics/...`, `/arts/...`) so the same code works behind Deno directly or behind nginx.
-- Comic/art names and page filenames contain spaces and Cyrillic — always `encodeURIComponent` per path segment on the frontend (see `encPath`/`urlFor` helpers); the server builds page URLs the same way and `decodeURIComponent`s incoming request paths.
-- Page and comic/chapter order use natural sort (`Intl.Collator` with `numeric: true`, like Windows Explorer) via `naturalCompare` in `server.ts` — keep any new sorting consistent with it.
-- Comic discovery is one level deep beyond the comic folder itself: a comic's subdirectories are treated as chapters; a chapter's own subdirectories (if any) are not scanned.
-- MIME types are the hardcoded `MIME` map in `server.ts`; add entries there if new file types are served.
-- `comics/`, `arts/`, and `characters/` are in `.gitignore`; never commit their contents.
-- On-the-fly image resize: large images are downscaled once into a "shadow" WebP derivative (same folder, name + `IMAGE_RESIZE_SUFFIX`, default `-sm` → `page.png` becomes `page-sm.webp`, lossless) and that derivative is served instead of the original. Controlled by `resolveImageUrl()`/`generateSmall()`/`scheduleResize()`/`purgeDerivatives()` in `server.ts`, config via env (`IMAGE_RESIZE_ENABLED` default true, `IMAGE_RESIZE_MAX_DIM` default 1600, `IMAGE_RESIZE_SUFFIX`, `IMAGE_RESIZE_QUALITY` default 82 (compression-effort for lossless WebP), `IMAGE_RESIZE_FORMAT` default "webp" (or "keep" for same-format), `IMAGE_RESIZE_CONCURRENCY`, `IMAGE_RESIZE_FORCE` to purge all existing derivatives on startup so they regenerate with current settings). Only the served **`url`** swaps to the derivative — `file`/`title`/`name` (the logical identity used for meta.json + sidecar matching) stay the original. Generation is async + concurrency-limited and never blocks a scan/request: a scan schedules missing/out-of-date derivatives (an existing derivative is reused if not older than its source), and the file write fires the watcher so the next scan serves them. Images already ≤ `MAX_DIM` get no derivative. Shadow files are excluded from the scanned lists by `isSmallVersion()` (stem ends with the suffix) in both `readImageFiles` and `scanArts`, so they're never listed or re-resized. Needs ImageMagick (`magick`/`convert`/`identify`) on PATH **and** `--allow-run=magick,convert,identify`; subprocesses are spawned with a sanitized env (`runCmd`, stripping `LD_*`/`DYLD_*` so a scoped `--allow-run` works even where `LD_LIBRARY_PATH` is set, e.g. snap). If IM or the permission is missing, resize is skipped once (logged) and originals are served — the server keeps working.
-- The router does full `innerHTML` re-renders per view (no vdom/diffing) — keep view functions self-contained and re-attach their own event listeners after rendering (see `bindNav()` and the per-view listener setup in `renderReader`/`renderComicDetail`).
-- Fullscreen (reader + art detail) uses the standard/webkit-prefixed Fullscreen API via `setupFullscreenButton()` in `app.js`; it feature-detects with `document.fullscreenEnabled` and hides the button entirely when unsupported (iOS Safari has no element-level Fullscreen API). `F` also toggles it in the reader. The fullscreen target is always `#app` (never `.reader`/`.art-detail`/an `<img>` directly) — those get torn down and rebuilt on every page turn or language switch (full `innerHTML` re-render), and a browser force-exits fullscreen the instant its fullscreen element is disconnected from the document; `#app` itself is never replaced, so fullscreen survives navigation. `setupFullscreenButton()` also tears down its own previous listener set on each call (via a module-level `_fsCleanup`) since language switches call `render()` directly rather than through `hashchange`.
-- Mobile: the fixed RU/EN corner toggle can visually collide with header content on narrow screens — `.reader-header`/`.section-header` reserve `padding-right` (mobile media query in `style.css`) to clear it; if you resize the toggle, re-check that clearance. Touch targets (`.reader-nav`, `.carousel-nav`) are kept at ≥44px on mobile per platform guidance.
-- "Baumans" has no Cyrillic glyphs, so Cyrillic headings/buttons silently fall back to "Baumans" — every rule using `"Baumans", sans-serif` also sets `font-weight: 900` explicitly so that fallback still renders bold instead of the browser default weight.
-- Reading progress is stored client-side in `localStorage` (`readingProgress` key, one entry per `<lang>/<name>`, `{chapterIdx, pageIdx, fraction, seenPages, totalPages, updatedAt}`) via `getProgress()`/`saveProgress()` in `app.js` — no server involvement. `seenPages` is the furthest page ever reached (monotonic — going back doesn't lower it). It's read by the comics grid (progress bar per card) and the comic detail page (progress bar + "continue reading" button).
-- "New / unread" star badge: a yellow spiky starburst with a black `!`, rendered inline (SVG) by `newBadge()` in `app.js` and styled via `.new-badge` in `style.css`. A comic is unread when `comicHasUnread()` is true — never opened, or `seenPages < totalPages` (so brand-new comics, partially-read comics, AND fully-read comics that later gained pages all light up). `totalPages` for the grid/landing comes from the `pages` count now included in the `/api/comics/<lang>` summary (`resolveComicSummary` in `server.ts`). Arts and characters are "new until visited", tracked in `localStorage` via a generic `isVisited(store, id)`/`markVisited(store, id)` (stores `visitedArts` keyed by file, `visitedCharacters` keyed by character name; thin wrappers `isArtVisited`/`markArtVisited`/`isCharacterVisited`/`markCharacterVisited`) — marked visited when the item's detail page opens. Badges appear on: the landing "Комиксы"/"Арты"/"Персонажи" buttons (aggregate — any unread comic / any unvisited art / any unvisited character, fetched best-effort so a failed fetch just omits them), each comics-grid card, the comic-detail title, each arts-grid card, and each characters-grid card.
+Production uses `./scripts/start.sh`, which binds `127.0.0.1:8080`. Both proxy templates target that port.
+
+There is no automated test suite. After changes, run the server and verify `/api/health`, relevant JSON responses, and the affected browser flow.
+
+## Architecture
+
+- `server.ts` scans content into memory, watches `POLINA_SITE`, generates derivatives, serves the API, and serves files in direct-development mode.
+- `static/app.js` contains the hash router, all views, localStorage state, reader navigation, preloading, and emulated fullscreen.
+- `static/style.css` contains all styling and the fixed fullscreen overlay.
+- `UPLOADING.md` is the short Russian authoring guide. Keep it synchronized with filesystem and metadata behavior.
+- `config/nginx.conf` and `config/apache.conf` serve static/content files and proxy `/api/` to Deno.
+
+API routes:
+
+```text
+GET /api/health
+GET /api/comics/<lang>?uiLang=<lang>
+GET /api/comics/<lang>/<name>?uiLang=<lang>
+GET /api/arts
+GET /api/characters?uiLang=<lang>
+```
+
+The summary response includes both a page count and natural-ordered `pageFiles`. JSON responses use `Cache-Control: no-store`.
+
+## Content invariants
+
+- Natural filename sorting is the editorial order for comics, chapters, teasers, arts, and character galleries. Do not add a separate order manifest unless explicitly requested.
+- Any comic subdirectory other than `teaser/` and `small/` is a chapter. If chapters exist, root images are ignored and the scanner logs a warning.
+- `meta.json` fields are optional. Localized text is a string or `{ "ru": "...", "en": "..." }`.
+- Page metadata prefers comic-relative keys such as `Chapter/1.png`, then falls back to a bare filename for compatibility. This prevents ambiguity when chapters repeat names.
+- `cover` follows the same relative-path-first lookup.
+- Character links match `meta.json` character names to `characters/<name>/` case-insensitively.
+- Path segments may contain spaces and Cyrillic. Encode each URL segment; never encode an entire multi-segment path as one segment.
+
+## Derivatives and replacement
+
+Large images generate current-format or lossless-WebP derivatives under a sibling `small/` directory. `small/` is the current and only derivative layout. Never reintroduce `-sm` sibling naming.
+
+Generation is asynchronous and concurrency-limited. A missing or older derivative schedules generation while the original is returned. The queue triggers a rescan when drained because watcher events are suppressed during generation.
+
+Atomic output must keep the real image extension last. ImageMagick chooses its encoder from that suffix; a temporary name ending only in `.tmp` can create source-format bytes later mislabeled as WebP.
+
+API image URLs contain a revision based on source stat data. Same-name source replacement therefore changes the URL. nginx and Apache apply a five-minute, revalidated fallback cache instead of immutable caching.
+
+`IMAGE_RESIZE_ENABLED=false` must not probe ImageMagick or request subprocess permission.
+
+## Browser state and fullscreen
+
+Reading progress is stored under `localStorage.readingProgress`. New records retain numeric indices for compatibility but use `pageFile` and `seenPageFiles` as stable identities. Inserting or naturally reordering pages must not move “Continue reading” to another file or mark an existing page as new.
+
+The reader and art viewer use emulated fullscreen, not the browser Fullscreen API. `#app.emulated-fullscreen` becomes a fixed `100dvh` overlay; body scrolling is locked and all controls except the exit icon are hidden. The class lives on `#app`, which survives reader rerenders and page turns. Leaving an eligible reader/art route must clear the class.
+
+Views replace `#app.innerHTML`; each view must attach its listeners after rendering. `setupFullscreenButton()` removes its prior listeners before binding the new exit button.
+
+## Production templates
+
+- nginx consolidates the shared content root with one regex `location` for `comics`, `arts`, and `characters`.
+- Apache uses one `AliasMatch` and one `DirectoryMatch` for the same URL prefixes.
+- Replace `/path/to/polina_site` and the example hostname before installation.
+- If `POLINA_SITE` differs from the repository path, point content mappings at that root while leaving the static document root at the repository's `static/` directory.
+- Keep the image-cache policy and upstream port consistent across both proxies.
+
+## Code conventions
+
+- Preserve the dependency-light architecture unless asked to change it.
+- Use relative frontend URLs.
+- Escape all content-derived text inserted through `innerHTML`.
+- Keep comments only for non-obvious invariants or compatibility constraints; do not duplicate README material in source files.
+- Keep changes scoped and preserve gitignored content.
+
+## Review backlog
+
+The next cleanup phase should add scanner/API tests before splitting files. Highest-value cases are natural ordering, flat-versus-chapter discovery, duplicate page basenames, invalid metadata, derivative refresh, replacement URL revisions, and progress migration. After coverage exists, split content scanning/resizing/routing out of `server.ts` and state/router/view helpers out of `static/app.js`.
+
+Also serialize overlapping scans, cancel stale frontend fetch/render work, validate `meta.json` shapes instead of relying on TypeScript casts, and cover request-path containment with regression tests. These are known hardening tasks, not established behavior to preserve.

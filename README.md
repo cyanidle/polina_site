@@ -1,158 +1,189 @@
 # Hardgrizz Comics
 
-A self-hosted webcomic + art site with a Hardgrizz-poster look: white background, red/yellow/blue geometric shapes, bold angular type. Deno backend, vanilla-JS single-page frontend — no build step, no database, no dependencies beyond [Deno](https://deno.land/).
+A self-hosted webcomic, art, and character-gallery site. The backend is a small Deno server; the frontend is a vanilla-JavaScript single-page application with no build step or database.
 
-For how to add comics/art, see **[UPLOADING.md](UPLOADING.md)** (short, in Russian, with layout examples).
+Content authoring instructions are in [UPLOADING.md](UPLOADING.md) (Russian).
 
 ## Quick start
 
-```bash
-# 1. Install Deno (once)
-curl -fsSL https://deno.land/install.sh | sh
+Requirements:
 
-# 2. Add a comic (Russian or English)
-mkdir -p "comics/ru/Мой комикс"
-cp page1.png page2.png "comics/ru/Мой комикс/"
-
-# 3. Run the server from the repo root
-deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts
-# or: deno task dev
-```
-
-Open http://127.0.0.1:8080 — done. (`--allow-run=…` is only for the optional on-the-fly image resize below; drop it if you don't use that.)
-
-Custom host/port:
+- [Deno](https://deno.com/) 2.x
+- optionally, ImageMagick 6 or 7 for automatic image resizing
 
 ```bash
-deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts 0.0.0.0 9090
+# Add content under comics/, arts/, and/or characters/, then run:
+deno task dev
 ```
 
-Custom content locations (e.g. content stored outside the repo):
+Open <http://127.0.0.1:8080>.
+
+`deno task dev` grants the permissions needed for content scanning, filesystem watching, and optional ImageMagick derivatives. To run without image resizing or subprocess permission:
 
 ```bash
-COMICS_DIR=/data/comics ARTS_DIR=/data/arts deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts
+IMAGE_RESIZE_ENABLED=false \
+  deno run --allow-net --allow-read --allow-env server.ts
 ```
 
-`COMICS_DIR`/`ARTS_DIR` accept absolute paths or paths relative to the working directory; they default to `comics`/`arts` under the repo root.
+Custom bind address and port are positional arguments:
 
-### Automatic image resize (optional)
+```bash
+deno run --allow-net --allow-read --allow-env --allow-write \
+  --allow-run=magick,convert,identify \
+  server.ts 0.0.0.0 9090
+```
 
-Large images are downscaled on the fly into smaller "shadow" WebP copies in a sibling `small/` subdirectory (e.g. `page.png` → `small/page.webp`) and those are served instead of the originals — handy when source pages are huge phone-scans. It's on by default and needs [ImageMagick](https://imagemagick.org/) (`magick`/`convert`/`identify`) plus `--allow-run` and `--allow-write` (for the `small/` dir — the server creates it automatically). If either is missing it's skipped (logged once) and originals are served — the server keeps working. Config (env vars):
+To keep content outside the repository, set one root containing all three content directories:
 
-| var | default | meaning |
-| --- | --- | --- |
-| `IMAGE_RESIZE_ENABLED` | `true` | `false` disables it entirely |
-| `IMAGE_RESIZE_MAX_DIM` | `1600` | max width/height of the derivative, in px (images already ≤ this are left alone) |
-| `IMAGE_RESIZE_QUALITY` | `82` | WebP/JPEG quality of the derivative (for lossless WebP: compression-effort) |
-| `IMAGE_RESIZE_FORMAT` | `webp` | output format: `webp` (smaller, re-encodes) or `keep` (same format as source) |
-| `IMAGE_RESIZE_CONCURRENCY` | `cpu cores` | parallel ImageMagick processes during generation |
-| `IMAGE_RESIZE_FORCE` | `false` | set to `true` to delete every `small/` directory on startup so derivatives regenerate with current settings (one-shot) |
+```bash
+POLINA_SITE=/data/polina deno task dev
+```
 
-Derivatives are generated in the background and cached; originals are never modified. **Derivatives are lossless WebP by default** (pixel-perfect quality, still smaller than PNG originals).
-
-Run `./scripts/ensure-small-dirs.sh` after adding new content to pre-create the `small/` directories — the server creates them on demand as well, but the script front-loads it for a fresh install. To regenerate all derivatives after changing resize settings, run `./scripts/purge-small-dirs.sh`, then restart with `IMAGE_RESIZE_FORCE=1`.
-
-## Site structure
-
-- **Landing** — welcome text, three buttons: "Комиксы" / "Арты" / "Персонажи".
-- **Арты** — grid of art with titles; click to open enlarged with description.
-- **Персонажи** — grid of characters (cover + name) from `arts/characters/`; each character is a folder of images, and opening one shows the whole gallery with a caption under each picture, plus links to every comic that character appears in.
-- **Комиксы** — grid of comics (cover + title) for the currently selected language; opening it drops straight into the list (no language-picker step). The RU/EN corner toggle switches which language's collection is listed.
-- **Comic page** — carousel (cover + `teaser/` images), navigable by click/dots/swipe; title, description, chapter picker, "Читать с начала", character list. A character's name is a link to its page when a matching image exists in `arts/characters/`.
-- **Reader** — one page at a time, arrow navigation (click/keyboard/swipe), page-jump field, fullscreen mode (button or <kbd>F</kbd>), author comment + publish date per page if set.
-
-On a visitor's **first arrival** an 18+ age gate is shown ("I am 18 or older" to enter, "Leave" to exit); the choice is remembered in `localStorage` so it only appears once. A short "18+" disclaimer footer is shown on every page.
-
-The whole UI is bilingual (RU/EN) via a corner toggle, which also selects which comic collection (`comics/ru/` vs `comics/en/`) the list shows. Comic text (title, description, character bios, page comments) can be translated within a single `meta.json` instead of duplicating the comic under both `comics/ru/` and `comics/en/` — see `UPLOADING.md`.
-
-Reading progress (chapter + page) is saved per comic in the browser's `localStorage` — the comic page shows a "Continue reading" button and progress bar, and the comics grid shows a thin progress bar under any comic you've started. This is per-browser, not synced anywhere.
-
-Unread content is flagged with a yellow pointy-star badge (a black `!` inside): on the landing page's "Комиксы" / "Арты" / "Персонажи" buttons (if anything is unread), on each comic, art, and character card, and on a comic's page (when it has pages you haven't read). A comic counts as unread until you've seen every page — including pages added after you'd already finished it — and an artwork or character until you've opened it once. Like reading progress, this is tracked per-browser in `localStorage`, not synced.
+`POLINA_SITE` may be absolute or relative to the working directory. The frontend always comes from this repository's `static/` directory.
 
 ## Content layout
 
-```
-comics/ru/<comic>/<page files>              single-chapter comic
-comics/ru/<comic>/<chapter>/<page files>    multi-chapter comic
-comics/ru/<comic>/teaser/<image files>      optional carousel images (not chapter pages)
-comics/ru/<comic>/meta.json                 optional: title, description, cover,
-                                             characters, per-page comments/dates
-comics/en/...                                same, for the English version
-arts/<file>                                  a piece of art
-arts/<file>.txt                              optional description sidecar
-arts/characters/<name>/<image>               a character = one folder of images
-arts/characters/<name>/<image>.txt           optional per-image description sidecar
-```
-
-Details and examples: **[UPLOADING.md](UPLOADING.md)**.
-
-`comics/` and `arts/` are gitignored — content lives only on the server, not in the repo. The server watches both directories (`Deno.watchFs`) and picks up changes within ~200ms, no restart needed.
-
-## How it works
-
-```
-static/          frontend: index.html (SPA shell), app.js (hash router + views), style.css
-server.ts        Deno server: static files, /api/comics, /api/arts, image serving
-comics/          your comics (gitignored)
-arts/            your art (gitignored)
-config/          optional production reverse-proxy + systemd configs
-scripts/         helper scripts (start.sh, resize dir mgmt, deploy)
-deno.json        deno task "dev"; also enables editor Deno support
+```text
+comics/
+├── ru/
+│   └── <comic>/
+└── en/
+    └── <comic>/
+arts/
+└── <art files>
+characters/
+└── <character>/
+    └── <gallery files>
 ```
 
-API (served from an in-memory cache kept fresh by `Deno.watchFs`):
+A comic can be flat or chaptered:
 
-- `GET /api/health` — `{status, comics, arts, characters}` counts
-- `GET /api/comics/<lang>` — list of `{lang, name, title, cover, pages}` (lang: `ru` or `en`)
-- `GET /api/comics/<lang>/<name>` — full comic: description, teaser, characters (each character has `name`, optional `about`, and `file` when a matching `arts/characters/` entry exists), chapters (each page has `file`, `url`, optional `comment`/`date`)
-- `GET /api/arts` — list of `{file, title, description, url}`
-- `GET /api/characters` — list of `{name, cover, images: [{file, url, description}], comics: [{lang, name, title}]}` from `arts/characters/<name>/` (one folder per character); `comics` is every comic referencing that character. Accepts `?uiLang=ru|en` to resolve comic titles.
+```text
+comics/ru/<comic>/<page image>                    flat comic
+comics/ru/<comic>/<chapter>/<page image>          chaptered comic
+comics/ru/<comic>/teaser/<image>                  optional detail-page carousel
+comics/ru/<comic>/meta.json                       optional metadata
+arts/<image>                                      artwork
+arts/<image stem>.txt                             optional art description
+characters/<name>/<image>                         character gallery
+characters/<name>/<image stem>.txt                optional image caption
+```
 
-Both comics endpoints accept an optional `?uiLang=ru|en` query param to resolve any translated (`{"ru": "...", "en": "..."}`) text fields in `meta.json`; it defaults to `<lang>` if omitted.
+Page files, chapters, teaser images, artworks, and character images use natural filename order: `2.png` comes before `10.png`. There is no separate page-index file and natural ordering is intentionally the source of truth.
 
-## Production (nginx or Apache)
+If a comic contains any non-reserved subdirectory, those subdirectories are chapters and root-level images are not pages. `teaser/` and generated `small/` directories are reserved and never become chapters. The server logs a warning when chapter folders cause root images to be ignored.
 
-The reverse proxy serves `static/`, `comics/`, `arts/` directly (with 7-day immutable cache headers on images) and proxies only `/api/` to Deno on localhost. Two equivalent configs are provided — use whichever you run.
+See [UPLOADING.md](UPLOADING.md) for the `meta.json` schema, naming advice, translations, and replacement workflow.
 
-**nginx:**
+The content directories are gitignored and are not part of a source deployment.
+
+## Image replacement and caching
+
+Source images may be replaced without renaming them. The filesystem watcher rescans content after roughly 200 ms, and API image URLs include a revision derived from the source file. This changes the browser URL when the source changes and prevents an old same-name image from being pinned in cache.
+
+The supplied nginx and Apache configs also limit image caching to five minutes with revalidation; they no longer use immutable seven-day caching. API JSON is served with `Cache-Control: no-store`.
+
+With resizing enabled, the first scan after a replacement may briefly return the new original while the new derivative is generated. Once generation finishes, the API switches to the corresponding `small/` URL.
+
+Do not replace or edit files inside `small/`. Replace the source image next to that directory. Avoid preserving an old source modification time; if a copy tool does so, run `touch` on the source after copying.
+
+## Automatic image resizing
+
+Resizing is enabled by default. Images larger than the configured maximum dimension are converted in the background into a sibling `small/` directory:
+
+```text
+comics/ru/Test/page.png       source, never modified
+comics/ru/Test/small/page.webp
+```
+
+The API serves a current derivative when one exists and otherwise serves the original while scheduling generation. ImageMagick runs with bounded concurrency. WebP output is lossless; `IMAGE_RESIZE_QUALITY` controls its compression effort.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `IMAGE_RESIZE_ENABLED` | `true` | Enable background derivatives |
+| `IMAGE_RESIZE_MAX_DIM` | `1600` | Maximum derivative width or height |
+| `IMAGE_RESIZE_QUALITY` | `82` | WebP compression effort or JPEG quality |
+| `IMAGE_RESIZE_FORMAT` | `webp` | `webp` or `keep` (source format) |
+| `IMAGE_RESIZE_CONCURRENCY` | CPU count, max 8 | Parallel ImageMagick jobs |
+| `IMAGE_RESIZE_FORCE` | `false` | Purge all `small/` directories once at startup |
+
+Useful maintenance commands:
 
 ```bash
-sudo cp config/nginx.conf /etc/nginx/sites-available/comic
-sudo ln -s /etc/nginx/sites-available/comic /etc/nginx/sites-enabled/
-# edit server_name and the /path/to/polina_site paths in the config
-sudo nginx -t && sudo nginx -s reload
-deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts   # stays on 127.0.0.1:8080
+./scripts/ensure-small-dirs.sh   # optional; the server also creates them
+./scripts/purge-small-dirs.sh    # remove every generated small/ directory
+deno task dev                    # regenerate derivatives as content is scanned
 ```
 
-**Apache:**
+`IMAGE_RESIZE_FORCE=true deno task dev` combines purging and regeneration in one startup.
 
-```bash
-sudo a2enmod proxy proxy_http headers expires alias   # once
-sudo cp config/apache.conf /etc/apache2/sites-available/comic.conf
-# edit ServerName and the /path/to/polina_site paths in the config
-sudo a2ensite comic && sudo apachectl configtest && sudo systemctl reload apache2
-deno run --allow-net --allow-read --allow-env --allow-run=magick,convert,identify server.ts   # stays on 127.0.0.1:8080
+## User-facing behavior
+
+- The RU/EN toggle changes the interface language and chooses the `comics/ru/` or `comics/en/` collection shown in the comic grid.
+- Comic detail pages show the cover, `teaser/` carousel, description, chapters, and linked characters.
+- The reader supports buttons, keyboard arrows, touch navigation, a page field, preloading, and an emulated fullscreen overlay. It does not invoke device fullscreen on mobile.
+- Reading progress and unread markers are browser-local (`localStorage`); there is no account or server-side synchronization.
+- Progress records include the comic-relative page filename. Inserting or naturally reordering files therefore does not make “Continue reading” jump to a different image.
+- The first visit shows an 18+ confirmation gate; acceptance is stored in the browser.
+
+## API
+
+The server scans content into memory on startup and refreshes it with `Deno.watchFs`.
+
+- `GET /api/health` — service status and content counts
+- `GET /api/comics/<ru|en>?uiLang=<ru|en>` — comic summaries, including `pages` and natural-ordered `pageFiles`
+- `GET /api/comics/<ru|en>/<name>?uiLang=<ru|en>` — comic detail and chapters
+- `GET /api/arts` — artworks
+- `GET /api/characters?uiLang=<ru|en>` — character galleries and related comics
+
+Comic text may be a string or a `{ "ru": "...", "en": "..." }` object. The API resolves localized fields for `uiLang`, then the comic collection language, then the first available value.
+
+## Repository map
+
+```text
+server.ts                    backend, scanner, derivatives, API, file serving
+static/index.html            SPA shell
+static/app.js                hash router, views, reader, browser state
+static/style.css             site styling
+config/nginx.conf            nginx production template
+config/apache.conf           Apache production template
+config/comic-server.service  systemd template
+scripts/start.sh             localhost production launcher (port 8080)
+scripts/*-small-dirs.sh      derivative maintenance
+compose/docker-compose.yml   auxiliary Cloudflare DDNS/certbot services
 ```
 
-The frontend uses the same relative URLs either way, so nothing else changes.
+The only source dependency is `@std/path`, locked and vendored through Deno. There are no npm packages or frontend build tools.
 
-## Running as a service
+## Production
 
-`scripts/start.sh` launches the server (`deno run ...`); `config/comic-server.service` is a systemd unit that runs it, so systemd manages a shell script rather than calling `deno` directly:
+Both supplied reverse-proxy templates serve the frontend and content directly, and proxy `/api/` to Deno at `127.0.0.1:8080`. Replace every `/path/to/polina_site` and `comics.local` placeholder before installing either config. If `POLINA_SITE` points elsewhere, update the shared content mapping too.
+
+Start the backend directly:
 
 ```bash
-# edit WorkingDirectory / ExecStart in config/comic-server.service first
+./scripts/start.sh
+```
+
+Or install the systemd template after editing its paths:
+
+```bash
 sudo cp config/comic-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now comic-server
-journalctl -u comic-server -f   # logs
+journalctl -u comic-server -f
 ```
 
-## Deploying updates
+For nginx, install `config/nginx.conf`, run `nginx -t`, and reload. For Apache, enable `proxy`, `proxy_http`, `headers`, `expires`, and `alias`, install `config/apache.conf`, run `apachectl configtest`, and reload.
 
-`scripts/deploy.sh` rsyncs the source code (not `comics/`/`arts/`, which are gitignored user content living only on the server) to the production host and optionally restarts the service:
+## Verification
+
+There is currently no automated test suite. Before deploying a change:
 
 ```bash
-# fill in REMOTE_HOST / REMOTE_PATH / RESTART_CMD at the top of the file first
-./scripts/deploy.sh
+deno check server.ts static/app.js
+bash -n scripts/*.sh
+git diff --check
 ```
+
+Then run the server, check `/api/health`, inspect a comic detail response to confirm its natural page order, and exercise replacement, reader navigation, and “Continue reading” in a browser.

@@ -1,9 +1,3 @@
-/* ══════════════════════════════════════════════════════════════
-   Hardgrizz Comics — theme
-   White background, primary-color geometry (red/yellow/blue),
-   bold black angular type (Baumans).
-   ══════════════════════════════════════════════════════════════ */
-
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -12,8 +6,6 @@
   --clr-red:    #e8352b;
   --clr-yellow: #f3c318;
   --clr-blue:   #1c4fd6;
-  --clr-line:   #111111;
-  --radius: 0; /* Hardgrizz: sharp corners everywhere */
 }
 
 html, body {
@@ -32,9 +24,6 @@ button, input {
 
 a { color: inherit; }
 
-.hidden { display: none !important; }
-
-/* ── type scale ─────────────────────────────────────────────── */
 h1, h2, h3, .display {
   font-family: "Baumans", sans-serif;
   font-weight: 900;
@@ -43,13 +32,10 @@ h1, h2, h3, .display {
   line-height: 1.02;
 }
 
-/* ── language toggle ────────────────────────────────────────── */
 .lang-toggle {
   position: fixed;
   top: 14px;
   right: 14px;
-  /* Above the 18+ age gate (z-index 1000) so language can be switched
-     while the gate is up — its text re-renders live on toggle. */
   z-index: 1100;
   background: var(--clr-bg);
   border: 3px solid var(--clr-ink);
@@ -74,7 +60,7 @@ h1, h2, h3, .display {
   background: var(--clr-yellow);
 }
 
-/* ── generic building blocks ────────────────────────────────── */
+html.detail-route .lang-toggle { display: none; }
 
 .btn {
   display: inline-flex;
@@ -85,7 +71,6 @@ h1, h2, h3, .display {
   background: var(--clr-bg);
   color: var(--clr-ink);
   font-family: "Baumans", sans-serif;
-  font-weight: 900;
   font-weight: 900;
   font-size: 1rem;
   text-transform: uppercase;
@@ -121,14 +106,7 @@ h1, h2, h3, .display {
   pointer-events: none;
 }
 .shape-circle  { border-radius: 50%; }
-.shape-triangle {
-  width: 0; height: 0;
-  background: none !important;
-}
-.shape-tri-up    { border-left: 60px solid transparent; border-right: 60px solid transparent; border-bottom: 100px solid var(--clr-red); }
 .shape-diamond   { transform: rotate(45deg); }
-
-/* ── page shell ─────────────────────────────────────────────── */
 
 #app {
   min-height: 100vh;
@@ -149,10 +127,6 @@ h1, h2, h3, .display {
   margin: 0 auto;
   padding: 0 24px;
 }
-
-/* ══════════════════════════════════════════════════════════════
-   Landing
-   ══════════════════════════════════════════════════════════════ */
 
 .landing {
   flex: 1;
@@ -229,10 +203,6 @@ h1, h2, h3, .display {
   padding: 18px 40px;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Section header (used on comics/arts list pages)
-   ══════════════════════════════════════════════════════════════ */
-
 .section-header {
   border-bottom: 4px solid var(--clr-ink);
   padding: 22px 0 18px;
@@ -262,10 +232,6 @@ h1, h2, h3, .display {
   gap: 6px;
 }
 .back-link:hover { color: var(--clr-red); }
-
-/* ══════════════════════════════════════════════════════════════
-   Grid (comics list / arts list)
-   ══════════════════════════════════════════════════════════════ */
 
 .grid {
   display: grid;
@@ -318,9 +284,6 @@ h1, h2, h3, .display {
   line-height: 1.2;
 }
 
-/* ── "new / unread" star badge ─────────────────────────────── */
-/* Yellow spiky starburst with a black "!", flagging unread comics/pages
-   and unvisited art. Rendered inline (SVG) by newBadge() in app.js. */
 .new-badge {
   display: inline-flex;
   width: 2.2rem;
@@ -334,8 +297,6 @@ h1, h2, h3, .display {
   display: block;
 }
 
-/* On a card: pinned to the top-right over the cover. The card clips its
-   overflow, so keep the badge inside the box (positive offsets). */
 .card .new-badge {
   position: absolute;
   top: 14px;
@@ -343,7 +304,6 @@ h1, h2, h3, .display {
   z-index: 3;
 }
 
-/* On the landing buttons: overhang the top-right corner. */
 .landing-buttons .btn {
   position: relative;
   overflow: visible;
@@ -357,7 +317,6 @@ h1, h2, h3, .display {
   z-index: 3;
 }
 
-/* On the comic-detail title: inline next to the heading text. */
 .comic-title .new-badge {
   width: 1.8rem;
   height: 1.8rem;
@@ -365,7 +324,6 @@ h1, h2, h3, .display {
   vertical-align: middle;
 }
 
-/* reading-progress indicator, shown when localStorage has saved a position */
 .card-progress {
   height: 5px;
   width: 100%;
@@ -386,10 +344,6 @@ h1, h2, h3, .display {
   width: 100%;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Comic detail
-   ══════════════════════════════════════════════════════════════ */
-
 .comic-detail {
   padding: 36px 0 60px;
 }
@@ -405,7 +359,6 @@ h1, h2, h3, .display {
   .comic-top { grid-template-columns: 1fr; }
 }
 
-/* carousel */
 .carousel {
   position: relative;
   border: 3px solid var(--clr-ink);
@@ -461,7 +414,6 @@ h1, h2, h3, .display {
 }
 .carousel-dot.active { background: var(--clr-red); }
 
-/* right column */
 .comic-title {
   font-size: clamp(1.8rem, 4vw, 2.6rem);
   margin-bottom: 16px;
@@ -524,7 +476,6 @@ h1, h2, h3, .display {
 }
 .chapter-btn:hover { background: var(--clr-blue); color: #fff; }
 
-/* characters */
 .characters {
   margin-top: 40px;
   border-top: 3px solid var(--clr-ink);
@@ -551,9 +502,6 @@ h1, h2, h3, .display {
   margin-bottom: 4px;
 }
 
-/* Clickable character name (button element) — links to its gallery page
-   when a matching arts/characters/ entry exists. Strip button chrome and
-   present it as an underlined red link. */
 .character-link {
   display: inline-block;
   padding: 0;
@@ -577,10 +525,6 @@ h1, h2, h3, .display {
   font-size: 0.85rem;
   color: #444;
 }
-
-/* ══════════════════════════════════════════════════════════════
-   Reader
-   ══════════════════════════════════════════════════════════════ */
 
 .reader {
   flex: 1;
@@ -624,14 +568,6 @@ h1, h2, h3, .display {
   color: #555;
 }
 
-.fullscreen-btn {
-  align-self: center;
-  font-size: 0.75rem;
-  padding: 8px 12px;
-  border: 2px solid var(--clr-ink);
-}
-
-/* icon-style fullscreen button — positioned inside the viewport */
 .fullscreen-icon {
   position: absolute;
   bottom: 24px;
@@ -650,63 +586,60 @@ h1, h2, h3, .display {
   justify-content: center;
 }
 .fullscreen-icon:hover { background: rgba(0, 0, 0, 0.7); }
-.fullscreen-icon.hidden { display: none; }
 
-/* Fullscreen mode — hide chrome, show only the image + exit icon.
-   Targets #app (not .reader directly) because the reader is torn down and
-   rebuilt on every page turn; #app is never replaced so fullscreen survives. */
-#app:fullscreen,
-#app:-webkit-full-screen {
+body.emulated-fullscreen-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#app.emulated-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: #000;
 }
-#app:fullscreen .reader-header,
-#app:-webkit-full-screen .reader-header,
-#app:fullscreen .reader-footer,
-#app:-webkit-full-screen .reader-footer {
+
+#app.emulated-fullscreen .reader-header,
+#app.emulated-fullscreen .reader-footer,
+#app.emulated-fullscreen .reader-nav,
+#app.emulated-fullscreen .container,
+#app.emulated-fullscreen .art-detail-title,
+#app.emulated-fullscreen .art-detail-description {
   display: none;
-}
-#app:fullscreen .reader-nav,
-#app:-webkit-full-screen .reader-nav {
-  display: none;
-}
-/* Viewport images — both reader and art detail — fill the screen in
-   fullscreen. Chrome (headers, footers, nav, titles) is hidden. */
-#app:fullscreen .reader-viewport,
-#app:-webkit-full-screen .reader-viewport,
-#app:fullscreen .art-viewport,
-#app:-webkit-full-screen .art-viewport {
-  overflow: hidden;
-  padding: 0;
-}
-#app:fullscreen .reader-viewport img,
-#app:-webkit-full-screen .reader-viewport img,
-#app:fullscreen .art-viewport img,
-#app:-webkit-full-screen .art-viewport img {
-  max-width: 100vw;
-  max-height: 100vh;
-  border: none;
-}
-#app:fullscreen .fullscreen-icon,
-#app:-webkit-full-screen .fullscreen-icon {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
 }
 
-#app:fullscreen .container,
-#app:-webkit-full-screen .container {
-  display: none;
-}
-#app:fullscreen .art-detail-title,
-#app:-webkit-full-screen .art-detail-title,
-#app:fullscreen .art-detail-description,
-#app:-webkit-full-screen .art-detail-description {
-  display: none;
-}
-#app:fullscreen .art-detail,
-#app:-webkit-full-screen .art-detail {
+#app.emulated-fullscreen .reader,
+#app.emulated-fullscreen .art-detail {
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
   padding: 0;
   gap: 0;
   background: #000;
+}
+
+#app.emulated-fullscreen .reader-viewport,
+#app.emulated-fullscreen .art-viewport {
+  width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+  padding: 0;
+}
+
+#app.emulated-fullscreen .reader-viewport img,
+#app.emulated-fullscreen .art-viewport img {
+  max-width: 100vw;
+  max-height: 100dvh;
+  border: none;
+}
+
+#app.emulated-fullscreen .fullscreen-icon {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .reader-viewport {
@@ -800,10 +733,6 @@ h1, h2, h3, .display {
   text-transform: none;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Arts
-   ══════════════════════════════════════════════════════════════ */
-
 .art-detail {
   flex: 1;
   display: flex;
@@ -846,7 +775,6 @@ h1, h2, h3, .display {
   white-space: pre-wrap;
 }
 
-/* ── character detail: gallery of images + per-picture captions ── */
 .character-gallery {
   display: flex;
   flex-direction: column;
@@ -884,13 +812,10 @@ h1, h2, h3, .display {
   white-space: pre-wrap;
 }
 
-/* character detail: "appears in comics" links to related works */
 .related-comics {
   margin-top: 8px;
   border-top: 3px solid var(--clr-ink);
   padding-top: 24px;
-  /* clear the footer disclaimer — the buttons carry a 5px drop-shadow, so
-     without this they butt right up against it */
   padding-bottom: 56px;
 }
 .related-comics-label {
@@ -911,25 +836,17 @@ h1, h2, h3, .display {
   padding: 10px 18px;
 }
 
-/* ── mobile ────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .reader-nav { display: none; }
   .reader-viewport img { max-height: 62vh; }
   .carousel-nav { width: 44px; height: 44px; }
 
-  /* Keep the fixed corner language toggle from sitting on top of
-     header content on narrow screens. */
   .lang-toggle { top: 8px; right: 8px; padding: 4px 8px; font-size: 0.65rem; }
   .reader-header { padding-right: 92px; flex-wrap: wrap; }
   .reader-header-top { flex-direction: column; align-items: flex-start; gap: 4px; }
   .section-header { padding-right: 92px; }
-  .fullscreen-btn { font-size: 0.68rem; padding: 6px 8px; }
   .fullscreen-icon { bottom: 16px; right: 16px; width: 34px; height: 34px; padding: 5px; }
 }
-
-/* ══════════════════════════════════════════════════════════════
-   18+ disclaimer footer + first-visit age gate
-   ══════════════════════════════════════════════════════════════ */
 
 .site-disclaimer {
   border-top: 3px solid var(--clr-ink);
@@ -944,7 +861,6 @@ h1, h2, h3, .display {
 }
 .site-disclaimer:empty { display: none; }
 
-/* Full-screen gate shown once, before content, on the first visit. */
 .age-gate {
   position: fixed;
   inset: 0;

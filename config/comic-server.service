@@ -1,12 +1,4 @@
-# Runs scripts/start.sh (which launches the Deno server) as a systemd service.
-#
-# Setup:
-#   1. Edit WorkingDirectory / ExecStart below to point at this repo.
-#   2. sudo cp config/comic-server.service /etc/systemd/system/
-#   3. sudo systemctl daemon-reload
-#   4. sudo systemctl enable --now comic-server
-#
-# Logs: journalctl -u comic-server -f
+# Replace paths before installation. Logs: journalctl -u comic-server -f
 
 [Unit]
 Description=Hardgrizz Comics webcomic server
@@ -14,12 +6,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/path/to/polina_site   # ← change me
-ExecStart=/path/to/polina_site/scripts/start.sh # ← change me
-# User=www-data                          # ← uncomment and set if not running as root
-# Environment=POLINA_SITE=/data/polina     # ← optional, see server.ts
-# Environment=IMAGE_RESIZE_ENABLED=true   # ← optional; on by default. Needs ImageMagick (already has --allow-run via start.sh)
-# Environment=IMAGE_RESIZE_MAX_DIM=1600   # ← optional; max side in px of the downscaled derivative
+WorkingDirectory=/path/to/polina_site
+ExecStart=/path/to/polina_site/scripts/start.sh
+# User=www-data
+# Environment=POLINA_SITE=/data/polina
+# Environment=IMAGE_RESIZE_ENABLED=true
+# Environment=IMAGE_RESIZE_MAX_DIM=1600
 Restart=on-failure
 RestartSec=2
 

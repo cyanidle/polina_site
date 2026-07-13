@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Removes every small/ directory under POLINA_SITE. Run this before restarting
-# the server with IMAGE_RESIZE_FORCE=1 to force a full regeneration of all
-# derivatives.
-#
-#   ./purge-small-dirs.sh
-#   IMAGE_RESIZE_FORCE=1 deno run … server.ts
+# Removes every generated small/ directory under POLINA_SITE.
 
 set -euo pipefail
 

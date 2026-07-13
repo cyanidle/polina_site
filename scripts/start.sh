@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
-DIR=$(realpath `dirname $0`/..)
+set -euo pipefail
 
-deno run \
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$DIR"
+
+exec deno run \
     --allow-net --allow-read --allow-env --allow-write \
     --allow-run=magick,convert,identify \
-    "$DIR/server.ts" 127.0.0.1 ${1:-9090}
+    "$DIR/server.ts" 127.0.0.1 "${1:-8080}"

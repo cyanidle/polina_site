@@ -1,64 +1,4 @@
-import { basename as pathBasename, dirname as pathDirname, extname as pathExtname, join } from "jsr:@std/path@1";
-
-/**
- * Webcomic server — auto-discovers comics and art from the filesystem.
- *
- * Uses Deno.watchFs to monitor the site root, so new content dropped
- * into any folder appears immediately — no restart and no per-request
- * scanning.
- *
- * All content lives under a single root directory (POLINA_SITE env var, default: cwd):
- *
- *   <root>/comics/<lang>/<comic>/<page files>            single-chapter comic
- *   <root>/comics/<lang>/<comic>/<chapter>/<page files>   multi-chapter comic
- *   <root>/comics/<lang>/<comic>/teaser/<image files>     carousel images (not chapter pages —
- *                                                        e.g. textless art), shown in file order
- *   <root>/comics/<lang>/<comic>/meta.json                optional metadata (see below)
- *   <root>/arts/<file>                                    a piece of art
- *   <root>/arts/<file>.txt                                optional description sidecar
- *   <root>/characters/<name>/<image files>                character gallery (one folder per character)
- *   <root>/characters/<name>/<image>.txt                  optional per-image description
- *
- * meta.json (all fields optional):
- *   {
- *     "title": "...",
- *     "description": "...",
- *     "cover": "0. Обложка.png",
- *     "characters": [{ "name": "...", "about": "..." }],
- *     "pages": { "3стр.png": { "comment": "...", "date": "2026-01-15" } }
- *   }
- *
- * title, description, character.about and page.comment may also be a
- * { "ru": "...", "en": "..." } object instead of a plain string — the API
- * resolves it per-request via the `uiLang` query param (falling back to
- * the comic's own <lang>, then to whichever translation exists).
- *
- * Architecture:
- *   - dev:  `deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts`
- *   - prod: run on 127.0.0.1:8080 behind nginx (see nginx.conf).
- *
- * Usage:
- *   deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts                # 127.0.0.1:8080
- *   deno run --allow-net --allow-read --allow-env --allow-write --allow-run=magick,convert,identify server.ts 0.0.0.0 9090   # custom host/port
- *
- * Env vars (optional; --allow-env is required regardless of whether they're set):
- *   POLINA_SITE  root directory with comics/, arts/, characters/ subdirs — absolute, or relative to cwd (default: cwd)
- *
- *   IMAGE_RESIZE_ENABLED       "1"/"true" to downscale large images on the fly (default: true)
- *   IMAGE_RESIZE_MAX_DIM       max width/height of the derivative, in px (default: 1600)
- *   IMAGE_RESIZE_QUALITY       WebP/JPEG quality of the derivative (default: 82; lossless WebP uses it as compression-effort)
- *   IMAGE_RESIZE_FORMAT        output format of the derivative: "webp" (smaller, default) or "keep" (same as source)
- *   IMAGE_RESIZE_CONCURRENCY   parallel ImageMagick processes during generation (default: 3, clamped 1-8)
- *   IMAGE_RESIZE_FORCE         "1"/"true" to purge every existing small/ dir on startup so they regenerate
- *                              with current settings (one-shot — the flag is cleared after purge)
- *
- * Derivatives live in a small/ subdirectory next to the original, e.g.
- * /comics/ru/Test/page.png -> /comics/ru/Test/small/page.webp.
- *
- * Image resize needs ImageMagick (magick/convert/identify) on PATH AND
- * --allow-run=magick,convert,identify. If either is missing, resize is
- * skipped (logged once) and originals are served — the server still works.
- */
+import { basename as pathBasename, dirname as pathDirname, extname as pathExtname, join, resolve as pathResolve } from "jsr:@std/path@1";
 
 const ROOT = Deno.cwd() + "/";
 
@@ -78,17 +18,7 @@ const STATIC_DIR = `${ROOT}static`;
 
 const LANGS = ["ru", "en"];
 
-// Reserved subdirectory name for carousel images — excluded from chapter
-// discovery so it never gets treated as a chapter itself.
 const TEASER_DIRNAME = "teaser";
-
-// Reserved subdirectory under ARTS_DIR that is skipped by the flat arts scan
-
-// Derivatives live in a `small/` subdirectory next to the original, e.g.
-// /comics/ru/Test/page.png -> /comics/ru/Test/small/page.webp.
-// Directories, so the isFile filter in readImageFiles / scanArts naturally
-// skips them; only scanComic's chapter-discovery loop needs an explicit
-// exclusion (same as teaser/).  The flat arts scan is also unaffected.
 const SMALL_DIRNAME = "small";
 
 const IMAGE_EXTS = new Set([
@@ -109,19 +39,12 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
-// Natural sort (like Windows Explorer): digit runs compare as numbers,
-// so "2стр.png" < "10стр.png".
+// Natural ordering is the editorial page index and must remain the default.
 const naturalCompare = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: "base",
 }).compare;
 
-// ── image-resize config ───────────────────────────────────────
-//
-// Large images are downscaled once into a "shadow" WebP copy living in a
-// small/ subdirectory next to the original: /path/to/page.png becomes
-// /path/to/small/page.webp. All optional; needs ImageMagick + `--allow-run`
-// (see the resize section below for details).
 function parseBool(v: string | undefined, def: boolean): boolean {
   if (v == null) return def;
   return /^(1|true|yes|on)$/i.test(v.trim());
@@ -132,50 +55,30 @@ const resizeMaxDim = parseInt(Deno.env.get("IMAGE_RESIZE_MAX_DIM") ?? "", 10) ||
 const resizeQuality = parseInt(Deno.env.get("IMAGE_RESIZE_QUALITY") ?? "", 10) || 82;
 const cores = navigator.hardwareConcurrency;
 const resizeConcurrency = Math.min(8, Math.max(1, parseInt(Deno.env.get("IMAGE_RESIZE_CONCURRENCY") ?? "", 10) || cores));
-// Output format of the derivative: "webp" (re-encode for much smaller files,
-// default) or "keep" (same format as the source).
 const resizeFormat = (Deno.env.get("IMAGE_RESIZE_FORMAT") ?? "webp").toLowerCase() === "keep" ? "keep" : "webp";
 
-// Detected at startup in main(): "im7" (magick), "im6" (convert), or null.
-// `resizeActive` is true only when enabled AND ImageMagick was detected AND
-// --allow-run is granted.
 let imKind: "im7" | "im6" | null = null;
 let resizeActive = false;
 
-// One-shot: when IMAGE_RESIZE_FORCE is set, main() purges every existing
-// small/ directory before the first scan so they all regenerate with current
-// settings (e.g. after changing FORMAT/QUALITY/MAX_DIM), then clears this.
 let resizeForce = parseBool(Deno.env.get("IMAGE_RESIZE_FORCE"), false);
 
-// Extension the derivative is written as. webp -> always .webp; keep -> the
-// source's own extension.
 function derivativeExt(srcExt: string): string {
   return resizeFormat === "webp" ? ".webp" : srcExt;
 }
 
-// Derivative filename: original stem + (possibly new) extension.
-//   "page.png" + webp -> "page.webp"; "page.png" + keep -> "page.png".
 function derivativeFilename(originalFile: string): string {
   const ext = pathExtname(originalFile);
   return pathBasename(originalFile, ext) + derivativeExt(ext);
 }
 
-// Absolute filesystem path of the derivative: small/ subdirectory next to
-// the original, with the (possibly format-converted) filename.
 function smallPath(originalPath: string): string {
   return join(pathDirname(originalPath), SMALL_DIRNAME, derivativeFilename(pathBasename(originalPath)));
 }
 
-// URL for the derivative — same segments as the original, but with small/
-// inserted before the filename.
 function smallUrl(segments: string[], originalFile: string): string {
   return urlFor(...segments, SMALL_DIRNAME, derivativeFilename(originalFile));
 }
 
-// ── types ────────────────────────────────────────────────────────
-
-// Either a plain string (shown regardless of UI language) or a map of
-// language code -> text, resolved per-request via pickLocale().
 type Localized = string | Record<string, string>;
 
 type PageMeta = { comment?: Localized; date?: string };
@@ -192,9 +95,6 @@ type Meta = {
 type Page = { file: string; url: string; comment?: Localized; date?: string };
 type Chapter = { name: string; pages: Page[] };
 
-// Internal cache shape: text fields stay Localized (unresolved) until a
-// request picks a uiLang. `lang` here is the comic's own collection
-// (comics/<lang>/...), used as the fallback locale when uiLang has no match.
 type ComicSummary = { lang: string; name: string; title: Localized; cover: string };
 type ComicDetail = ComicSummary & {
   description: Localized;
@@ -205,10 +105,6 @@ type ComicDetail = ComicSummary & {
 
 type Art = { file: string; title: string; description: string; url: string };
 
-// A character, scanned from arts/characters/<name>/ — a folder holding an
-// arbitrary number of images, each with an optional <image>.txt description.
-// `name` is the folder name and is what comic meta.json `characters[].name`
-// is matched against to make a comic's character label clickable.
 type CharacterImage = { file: string; url: string; description: string };
 type CharacterEntry = { name: string; cover: string; images: CharacterImage[] };
 
@@ -218,18 +114,20 @@ function pickLocale(value: Localized | undefined, uiLang: string, fallbackLang: 
   return value[uiLang] ?? value[fallbackLang] ?? Object.values(value)[0] ?? "";
 }
 
-// The title used for sorting/logging — resolved against the comic's own
-// collection language, independent of any visitor's UI language.
 function nativeTitle(c: ComicSummary): string {
   return pickLocale(c.title, c.lang, c.lang);
 }
 
-// Cached comics are full ComicDetail objects, so we can surface a total
-// page count in the summary — the frontend uses it to flag comics with
-// unread/new pages without fetching every comic's detail.
 function resolveComicSummary(c: ComicDetail, uiLang: string) {
-  const pages = c.chapters.reduce((n, ch) => n + ch.pages.length, 0);
-  return { lang: c.lang, name: c.name, title: pickLocale(c.title, uiLang, c.lang), cover: c.cover, pages };
+  const pageFiles = c.chapters.flatMap((ch) => ch.pages.map((page) => page.file));
+  return {
+    lang: c.lang,
+    name: c.name,
+    title: pickLocale(c.title, uiLang, c.lang),
+    cover: c.cover,
+    pages: pageFiles.length,
+    pageFiles,
+  };
 }
 
 function resolveComicDetail(c: ComicDetail, uiLang: string) {
@@ -240,9 +138,6 @@ function resolveComicDetail(c: ComicDetail, uiLang: string) {
     cover: c.cover,
     description: pickLocale(c.description, uiLang, c.lang),
     teaser: c.teaser,
-    // `link` is the gallery character's name (the arts/characters/<name>/
-    // folder) when a match exists, so the frontend can link the label to its
-    // page. Matched case-insensitively; the gallery's own casing is used.
     characters: c.characters.map((ch) => {
       const match = characters.find((g) => g.name.toLowerCase() === ch.name.toLowerCase());
       return { name: ch.name, about: pickLocale(ch.about, uiLang, c.lang), link: match?.name };
@@ -259,9 +154,6 @@ function resolveComicDetail(c: ComicDetail, uiLang: string) {
   };
 }
 
-// Every comic (across all languages) whose meta.json references this
-// character by name (case-insensitive) — used to show "appears in" links on
-// the character's page. Titles are resolved for the requesting uiLang.
 function comicsForCharacter(charName: string, uiLang: string) {
   const target = charName.toLowerCase();
   const refs: { lang: string; name: string; title: string }[] = [];
@@ -278,12 +170,6 @@ function comicsForCharacter(charName: string, uiLang: string) {
 function resolveCharacter(c: CharacterEntry, uiLang: string) {
   return { ...c, comics: comicsForCharacter(c.name, uiLang) };
 }
-
-// ── content cache ────────────────────────────────────────────────
-//
-// The filesystem is scanned once at startup, then kept up-to-date by
-// a Deno.watchFs watcher. API handlers read from this cache so they
-// never touch the disk.
 
 let comicsByLang: Record<string, ComicDetail[]> = {};
 let arts: Art[] = [];
@@ -316,7 +202,10 @@ async function readMeta(dir: string): Promise<Meta> {
   try {
     const text = await Deno.readTextFile(`${dir}/meta.json`);
     return JSON.parse(text) as Meta;
-  } catch {
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      console.log(`[comic-server] warning: cannot read ${dir}/meta.json — ${error instanceof Error ? error.message : String(error)}`);
+    }
     return {};
   }
 }
@@ -326,22 +215,9 @@ function basenameOf(relPath: string): string {
   return slash === -1 ? relPath : relPath.substring(slash + 1);
 }
 
-// ── image resize (ImageMagick) ────────────────────────────────
-//
-// Large source images are downscaled once into a "shadow" derivative in a
-// sibling small/ subdirectory (e.g. page.png -> small/page.webp) and that
-// derivative is served instead of the original. Generation is async and
-// non-blocking: a scan schedules any missing/out-of-date derivatives, and
-// the next scan (the file write fires the watcher) serves them. Originals
-// are never modified; derivatives are plain cache files living in the same
-// (gitignored) content dirs, served by the existing /comics/ and /arts/ routes.
-
 let _runDenied = false;
 
-// Environment passed to ImageMagick: the inherited env minus library-injection
-// vars (LD_LIBRARY_PATH, DYLD_*, …). Deno refuses to leak those to a subprocess
-// unless --allow-all, so stripping them lets a scoped --allow-run work in
-// environments that set LD_* (snap packages, some containers). Built once.
+// Scoped --allow-run rejects inherited library-injection variables.
 const _subEnv: Record<string, string> = Object.fromEntries(
   Object.entries(Deno.env.toObject()).filter(([k]) => !/^(LD_|DYLD_)/.test(k)),
 ) as Record<string, string>;
@@ -381,13 +257,8 @@ function identifyArgs(filePath: string): string[] {
 }
 
 function resizeArgs(filePath: string, smallPath: string, outExt: string): string[] {
-  // `>` shrinks only if larger than the box, so already-small images are left
-  // untouched; -strip drops metadata for smaller files.
   const opts = ["-resize", `${resizeMaxDim}x${resizeMaxDim}>`, "-strip"];
-  // -quality is only meaningful for lossy formats (for PNG it's the zlib
-  // level 0-9), so it applies to the *output* — webp/jpeg — not the source.
-  // Lossless webp uses -quality for compression-effort (0-100) rather than
-  // visual quality; the true lossless parameter is the -define.
+  // Lossless WebP interprets quality as compression effort.
   if (outExt === ".webp") {
     opts.push("-quality", String(resizeQuality), "-define", "webp:lossless=true");
   } else if (outExt === ".jpg" || outExt === ".jpeg") {
@@ -409,19 +280,16 @@ async function identifyDims(filePath: string): Promise<{ w: number; h: number } 
 async function generateSmall(originalPath: string): Promise<boolean> {
   const dims = await identifyDims(originalPath);
   if (!dims) return false;
-  if (Math.max(dims.w, dims.h) <= resizeMaxDim) return false; // already small enough
+  if (Math.max(dims.w, dims.h) <= resizeMaxDim) return false;
   const outExt = derivativeExt(extOf(originalPath));
   const derivative = smallPath(originalPath);
-  // ensure the small/ directory exists (one stat + conditional mkdir)
   const smallDir = pathDirname(derivative);
   try { await Deno.stat(smallDir); } catch {
     await Deno.mkdir(smallDir, { recursive: true });
   }
-  // Write to a temp file first, then atomically rename to the final path.
-  // If the process dies mid-conversion the partial file is never served —
-  // resolveImageUrl only looks for the final name.
-  const tmp = `${derivative}.tmp`;
-  // Clean up any stale temp file from a previous crash.
+  // Keep the real output extension last. ImageMagick selects its encoder from
+  // the suffix; `page.webp.tmp` would contain mislabeled source-format bytes.
+  const tmp = `${derivative}.tmp${outExt}`;
   try { await Deno.remove(tmp); } catch { /* didn't exist */ }
   let origSize = 0;
   try { origSize = (await Deno.stat(originalPath)).size; } catch { /* ignore */ }
@@ -439,7 +307,6 @@ async function generateSmall(originalPath: string): Promise<boolean> {
     console.log(`[comic-server] resized ${basenameOf(originalPath)} (${dims.w}×${dims.h} → ≤${resizeMaxDim}px, ${fmt} q${resizeQuality}${pct})`);
     return true;
   } else {
-    // Remove the partial temp file on failure.
     try { await Deno.remove(tmp); } catch { /* ignore */ }
     if (r.stderr) {
       console.log(`[comic-server] resize failed: ${basenameOf(originalPath)} — ${r.stderr.trim()}`);
@@ -448,17 +315,12 @@ async function generateSmall(originalPath: string): Promise<boolean> {
   return false;
 }
 
-// Bounded-concurrency queue so a big first scan doesn't fork dozens of
-// ImageMagick processes at once. Tasks run as slots free up.
 const Generating = new Set<string>();
 let _genActive = 0;
 let _resizedCount = 0;
 const _genWaiters: Array<() => void> = [];
 
-// Called after every task finishes; when the queue is fully drained, log a
-// summary and trigger a rescan so the in-memory cache picks up the new
-// derivatives (the watcher may have ignored the file events while generation
-// was still in progress).
+// Watcher events are suppressed during generation, so drain triggers a scan.
 function _maybeDrain(): void {
   if (Generating.size > 0 || _genActive > 0) return;
   if (_resizedCount > 0) {
@@ -502,19 +364,31 @@ function scheduleResize(originalPath: string): void {
   });
 }
 
-// URL to serve for an image: the derivative if a current one exists, else
-// the original (scheduling generation of the derivative in the background).
-// `segments` are the URL path parts up to (but not including) the filename.
 async function resolveImageUrl(dir: string, file: string, segments: string[]): Promise<string> {
-  const originalUrl = urlFor(...segments, file);
-  if (!resizeActive) return originalUrl;
   const origPath = `${dir}/${file}`;
+  let originalInfo: Deno.FileInfo | null = null;
+  try { originalInfo = await Deno.stat(origPath); } catch { /* scanner will omit missing files on its next pass */ }
+
+  // Same-name replacements need a new URL to escape browser and proxy caches.
+  const revision = originalInfo
+    ? [
+      originalInfo.mtime?.getTime() ?? 0,
+      originalInfo.birthtime?.getTime() ?? 0,
+      originalInfo.ino ?? 0,
+      originalInfo.size,
+    ]
+      .map((value) => value.toString(36))
+      .join("-")
+    : "missing";
+  const versioned = (url: string) => `${url}?v=${revision}`;
+  const originalUrl = versioned(urlFor(...segments, file));
+  if (!resizeActive || !originalInfo) return originalUrl;
+
   const derivPath = smallPath(origPath);
   try {
-    const [s, o] = await Promise.all([Deno.stat(derivPath), Deno.stat(origPath)]);
-    // Derivative is current only if not older than its source.
-    if ((s.mtime?.getTime() ?? 0) >= (o.mtime?.getTime() ?? 0)) {
-      return smallUrl(segments, file);
+    const s = await Deno.stat(derivPath);
+    if ((s.mtime?.getTime() ?? 0) >= (originalInfo.mtime?.getTime() ?? 0)) {
+      return versioned(smallUrl(segments, file));
     }
   } catch { /* derivative missing -> fall through and schedule it */ }
   scheduleResize(origPath);
@@ -524,6 +398,7 @@ async function resolveImageUrl(dir: string, file: string, segments: string[]): P
 async function scanComic(lang: string, name: string): Promise<ComicDetail | null> {
   const dir = `${COMICS_DIR}/${lang}/${name}`;
   const entries = await readDirSafe(dir);
+  const meta = await readMeta(dir);
   const subdirs = entries
     .filter((e) => e.isDirectory && e.name !== TEASER_DIRNAME && e.name !== SMALL_DIRNAME)
     .sort((a, b) => naturalCompare(a.name, b.name));
@@ -558,13 +433,21 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
     return null;
   }
 
-  const meta = await readMeta(dir);
   const allPages = chapters.flatMap((c) => c.pages);
 
-  // attach per-page comment/date from meta.json (keyed by bare filename)
+  if (subdirs.length > 0) {
+    const ignoredRootPages = await readImageFiles(dir);
+    if (ignoredRootPages.length > 0) {
+      console.log(`[comic-server] warning: '${name}' (${lang}) has chapter folders, so ${ignoredRootPages.length} root image(s) are ignored`);
+    }
+  }
+
+  // Prefer a comic-relative path ("Chapter/1.png") so repeated filenames in
+  // different chapters can carry distinct metadata. Bare filenames remain a
+  // backwards-compatible fallback.
   if (meta.pages) {
     for (const page of allPages) {
-      const pm = meta.pages[basenameOf(page.file)];
+      const pm = meta.pages[page.file] ?? meta.pages[basenameOf(page.file)];
       if (pm) {
         page.comment = pm.comment;
         page.date = pm.date;
@@ -572,9 +455,9 @@ async function scanComic(lang: string, name: string): Promise<ComicDetail | null
     }
   }
 
-  const findByBasename = (bare: string) => allPages.find((p) => basenameOf(p.file) === bare);
-
-  const coverPage = (meta.cover && findByBasename(meta.cover)) || allPages[0];
+  const findPage = (ref: string) => allPages.find((page) => page.file === ref) ??
+    allPages.find((page) => basenameOf(page.file) === ref);
+  const coverPage = (meta.cover && findPage(meta.cover)) || allPages[0];
 
   const teaserDir = `${dir}/${TEASER_DIRNAME}`;
   const teaserFiles = await readImageFiles(teaserDir);
@@ -631,11 +514,6 @@ async function scanArts(): Promise<Art[]> {
   return result;
 }
 
-// Character gallery — characters/<name>/ is one folder per character,
-// holding any number of images, each with an optional <image>.txt sidecar
-// for a per-picture description. The folder name is the character name; its
-// first image (natural sort) is the cover. Loose files directly under
-// characters/ (not in a subfolder) and empty folders are ignored.
 async function scanCharacters(): Promise<CharacterEntry[]> {
   const dirs = (await readDirSafe(CHARACTERS_DIR)).filter((e) => e.isDirectory).map((e) => e.name);
   dirs.sort(naturalCompare);
@@ -661,9 +539,6 @@ async function scanCharacters(): Promise<CharacterEntry[]> {
   return result;
 }
 
-// Delete every small/ directory under `root` so derivatives get regenerated
-// with current settings. Used by the one-shot IMAGE_RESIZE_FORCE flag at
-// startup. Returns how many files were removed.
 async function purgeDerivatives(root: string): Promise<number> {
   let n = 0;
   const walk = async (dir: string): Promise<void> => {
@@ -671,7 +546,6 @@ async function purgeDerivatives(root: string): Promise<number> {
     for (const e of entries) {
       const p = join(dir, e.name);
       if (e.isDirectory && e.name === SMALL_DIRNAME) {
-        // Count files inside before removing the directory
         const smallEntries = await readDirSafe(p);
         n += smallEntries.filter((f) => f.isFile).length;
         try { await Deno.remove(p, { recursive: true }); } catch { /* ignore */ }
@@ -695,8 +569,6 @@ async function scan(): Promise<void> {
   console.log(`[comic-server]   + ${characters.length} character(s)`);
 }
 
-// ── filesystem watcher ─────────────────────────────────────────
-
 function startWatcher(): Deno.FsWatcher {
   const DEBOUNCE_MS = 200;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -718,14 +590,18 @@ function startWatcher(): Deno.FsWatcher {
   return watcher;
 }
 
-// ── file serving ───────────────────────────────────────────────
-
 function extOf(path: string): string {
   return pathExtname(path).toLowerCase();
 }
 
 function mimeType(path: string): string {
   return MIME[extOf(path)] ?? "application/octet-stream";
+}
+
+function requestFilePath(root: string, relativePath: string): string | null {
+  const base = pathResolve(root);
+  const candidate = pathResolve(base, relativePath);
+  return candidate.startsWith(`${base}/`) ? candidate : null;
 }
 
 async function serveFile(filePath: string): Promise<Response> {
@@ -751,16 +627,20 @@ function json(data: unknown, status = 200): Response {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Content-Length": String(new TextEncoder().encode(body).length),
+      "Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
     },
   });
 }
 
-// ── routing ────────────────────────────────────────────────────
-
 async function handle(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const path = decodeURIComponent(url.pathname);
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    return new Response("Bad request", { status: 400 });
+  }
 
   if (path === "/api/health") {
     const total = LANGS.reduce((n, l) => n + (comicsByLang[l]?.length ?? 0), 0);
@@ -776,8 +656,6 @@ async function handle(req: Request): Promise<Response> {
     return json(characters.map((c) => resolveCharacter(c, uiLang)));
   }
 
-  // /api/comics/<lang> -> summaries
-  // /api/comics/<lang>/<name> -> full detail
   if (path.startsWith("/api/comics/")) {
     const rest = path.slice("/api/comics/".length).replace(/\/$/, "");
     const slash = rest.indexOf("/");
@@ -799,43 +677,38 @@ async function handle(req: Request): Promise<Response> {
     return json(resolveComicDetail(comic, uiLang));
   }
 
-  // Comic, art, and character images — served from the real content dirs,
-  // not literally "<ROOT>/comics" etc.
   if (path.startsWith("/comics/")) {
-    const filePath = `${COMICS_DIR}/${path.slice("/comics/".length)}`;
+    const filePath = requestFilePath(COMICS_DIR, path.slice("/comics/".length));
+    if (!filePath) return new Response("Not found", { status: 404 });
     return await serveFile(filePath);
   }
   if (path.startsWith("/arts/")) {
-    const filePath = `${ARTS_DIR}/${path.slice("/arts/".length)}`;
+    const filePath = requestFilePath(ARTS_DIR, path.slice("/arts/".length));
+    if (!filePath) return new Response("Not found", { status: 404 });
     return await serveFile(filePath);
   }
   if (path.startsWith("/characters/")) {
-    const filePath = `${CHARACTERS_DIR}/${path.slice("/characters/".length)}`;
+    const filePath = requestFilePath(CHARACTERS_DIR, path.slice("/characters/".length));
+    if (!filePath) return new Response("Not found", { status: 404 });
     return await serveFile(filePath);
   }
 
-  // Static frontend files
-  let staticPath = `${STATIC_DIR}${path}`;
-  if (path === "/" || path.endsWith("/")) {
-    staticPath = `${STATIC_DIR}${path}index.html`;
-  }
+  const staticRelativePath = `${path.slice(1)}${path === "/" || path.endsWith("/") ? "index.html" : ""}`;
+  const staticPath = requestFilePath(STATIC_DIR, staticRelativePath);
+  if (!staticPath) return new Response("Not found", { status: 404 });
   const res = await serveFile(staticPath);
-  // SPA fallback: unknown non-file routes (client-side router paths) serve index.html
   if (res.status === 404 && !extOf(path)) {
     return await serveFile(`${STATIC_DIR}/index.html`);
   }
   return res;
 }
 
-// ── main ───────────────────────────────────────────────────────
-
 async function main() {
   const hostname = Deno.args[0] ?? "127.0.0.1";
   const port = parseInt(Deno.args[1] ?? "8080", 10);
 
-  // Detect ImageMagick for optional on-the-fly resize of large images.
-  imKind = await detectIm();
   if (resizeEnabledCfg) {
+    imKind = await detectIm();
     if (_runDenied) {
       console.log("[comic-server] image resize: --allow-run not granted; serving originals. Add --allow-run=magick,convert,identify or set IMAGE_RESIZE_ENABLED=false");
     } else if (!imKind) {
@@ -848,21 +721,14 @@ async function main() {
     console.log("[comic-server] image resize: disabled (IMAGE_RESIZE_ENABLED=false)");
   }
 
-  // One-shot purge of all existing derivatives so they regenerate with
-  // current settings (set IMAGE_RESIZE_FORCE=1 to trigger this).
   if (resizeForce && resizeActive) {
     await purgeDerivatives(SITE_DIR);
     console.log("[comic-server] image resize: purged old derivatives for regeneration");
     resizeForce = false;
   }
 
-  // Initial scan
   await scan();
-
-  // Watch for changes
   const watcher = startWatcher();
-
-  // Shutdown cleanup
   const shutdown = () => {
     console.log("\nshutting down…");
     try { watcher.close(); } catch { /* ok */ }
