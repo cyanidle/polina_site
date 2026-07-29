@@ -1,0 +1,13 @@
+[Unit]
+Description=Renew Let's Encrypt certs via Docker certbot (DNS-Cloudflare)
+
+[Service]
+Type=oneshot
+# Единый контейнер certbot, общий для всех сайтов на машине.
+# В /etc/letsencrypt хранятся выпущенные сертификаты и renewal-конфиги;
+# /etc/letsencrypt/cloudflare.ini — общий credentials-файл (права 600).
+ExecStart=/usr/bin/docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt \
+  -v /etc/letsencrypt/cloudflare.ini:/cloudflare.ini:ro \
+  certbot/dns-cloudflare renew --quiet
+ExecStartPost=/usr/bin/systemctl reload apache2

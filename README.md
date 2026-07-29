@@ -149,8 +149,13 @@ config/nginx.conf            nginx production template
 config/apache.conf           Apache production template
 config/comic-server.service  systemd template
 scripts/start.sh             localhost production launcher (port 8080)
+scripts/setup.sh             DDNS + TLS certs + shared renewal timer
+scripts/setup-ddns.sh        Cloudflare DDNS for hardgrizz.art
+scripts/setup-certs.sh       issue hardgrizz.art TLS certs
+scripts/setup-renewal.sh     install shared certbot-renew timer
 scripts/*-small-dirs.sh      derivative maintenance
-compose/docker-compose.yml   auxiliary Cloudflare DDNS/certbot services
+compose/docker-compose.yml   Cloudflare DDNS service
+systemd/certbot-renew.*      shared cert renewal timer/service
 ```
 
 The only source dependency is `@std/path`, locked and vendored through Deno. There are no npm packages or frontend build tools.
@@ -175,6 +180,30 @@ journalctl -u comic-server -f
 ```
 
 For nginx, install `config/nginx.conf`, run `nginx -t`, and reload. For Apache, enable `proxy`, `proxy_http`, `headers`, `expires`, and `alias`, install `config/apache.conf`, run `apachectl configtest`, and reload.
+
+### TLS and DynDNS
+
+Prerequisites:
+
+- Docker and `docker compose` are installed.
+- Cloudflare hosts the zone and the API token has `Zone.DNS:Edit`.
+- `/etc/letsencrypt/cloudflare.ini` exists (or `compose/cloudflare.ini` exists and will be migrated). Permissions must be `600`.
+
+Run the self-contained setup:
+
+```bash
+./scripts/setup.sh
+```
+
+This starts DDNS, issues/renews certificates, and installs the shared systemd renewal timer. The timer is identical to the one in `piokurort`; running both sites' setup scripts writes the same `certbot-renew.timer`/`certbot-renew.service` files, so only one renewal job remains in the system. It renews **all** certificates in `/etc/letsencrypt` and reloads Apache.
+
+Granular commands:
+
+```bash
+./scripts/setup-ddns.sh     # start/restart ddns container
+./scripts/setup-certs.sh    # issue hardgrizz.art certificates
+./scripts/setup-renewal.sh  # install/enable the shared renewal timer
+```
 
 ## Verification
 

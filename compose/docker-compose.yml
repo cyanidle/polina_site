@@ -1,3 +1,7 @@
+# DDNS для зоны hardgrizz.art.
+# Сертификаты и их продление живут отдельно (scripts/setup-certs.sh
+# и scripts/setup-renewal.sh) и общие для всех сайтов на машине.
+
 services:
   ddns:
     container_name: ddns
@@ -10,11 +14,3 @@ services:
       - RRTYPE=A
       - DELETE_ON_STOP=false
       - DNS_SERVER=1.1.1.1
-
-  certbot:
-    image: certbot/dns-cloudflare
-    container_name: certbot
-    profiles: ["tools"]
-    volumes:
-      - /etc/letsencrypt:/etc/letsencrypt
-      - ./cloudflare.ini:/cloudflare.ini:ro
