@@ -147,8 +147,10 @@ static/app.js                hash router, views, reader, browser state
 static/style.css             site styling
 config/nginx.conf            nginx production template
 config/apache.conf           Apache production template
+config/comic.conf            Apache config for this server (hardgrizz.art)
 config/comic-server.service  systemd template
 scripts/start.sh             localhost production launcher (port 8080)
+scripts/update-apache.sh     install config/comic.conf and reload Apache
 scripts/setup.sh             DDNS + TLS certs + shared renewal timer
 scripts/setup-ddns.sh        Cloudflare DDNS for hardgrizz.art
 scripts/setup-certs.sh       issue hardgrizz.art TLS certs
@@ -180,6 +182,8 @@ journalctl -u comic-server -f
 ```
 
 For nginx, install `config/nginx.conf`, run `nginx -t`, and reload. For Apache, enable `proxy`, `proxy_http`, `headers`, `expires`, and `alias`, install `config/apache.conf`, run `apachectl configtest`, and reload.
+
+On this server the live config is `config/comic.conf` (hardgrizz.art, with per-site logs); after editing it run `sudo ./scripts/update-apache.sh` — it backs up the current `/etc/apache2/sites-available/comic.conf`, installs the new one, validates with `apachectl configtest`, and reloads Apache.
 
 ### TLS and DynDNS
 
